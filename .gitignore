@@ -1,0 +1,20 @@
+# SQLite database (local)
+wwwroot/data/*.db
+wwwroot/data/*.db-*
+
+# Logs
+wwwroot/logs/*.log
+
+# Large JARs (downloaded at deploy/startup time)
+wwwroot/lib/*.jar
+
+# ColdFusion server artifacts
+**/WEB-INF/
+
+# Local Lucee Express runtime (downloaded by scripts/start-lucee.sh)
+.runtime/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

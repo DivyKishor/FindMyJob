@@ -1,0 +1,29 @@
+{
+  "name": "jobfinder",
+  "app": {
+    "cfengine": "lucee@6",
+    "webroot": "wwwroot"
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "http": {
+      "port": 8888,
+      "enable": true
+    },
+    "ajp": { "enable": false },
+    "blockCFAdmin": false,
+    "rules": [
+      "block-external( /services/ )",
+      "block-external( /sql/ )",
+      "block-external( /config/ )",
+      "block-external( /lib/ )",
+      "block-external( /data/ )",
+      "block-external( /logs/ )"
+    ]
+  },
+  "jvm": {
+    "heapSize": "256",
+    "minHeapSize": "128",
+    "args": "--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED"
+  }
+}
