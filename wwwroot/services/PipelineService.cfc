@@ -25,11 +25,13 @@
 	<cffunction name="runDaily" access="public" returntype="struct" output="false">
 		<cfset variables.loggerService.info( "Daily pipeline started." ) />
 		<cftry>
+			<cfset cfWatcherJobs = variables.scrapeOrchestrator.runCfGlobalWatcher() />
 			<cfset discoverySummary = variables.discoveryService.runDiscovery() />
 			<cfset scrapeSummary = variables.scrapeOrchestrator.runAll() />
 			<cfset scoreSummary = variables.jobScoreService.scoreAllJobs() />
 			<cfset alertSummary = variables.alertService.generateAlerts( 40 ) />
 			<cfset resultSummary = {
+				cfGlobalWatcher: { jobsUpserted: cfWatcherJobs },
 				discovery: discoverySummary,
 				scrape: scrapeSummary,
 				score: scoreSummary,

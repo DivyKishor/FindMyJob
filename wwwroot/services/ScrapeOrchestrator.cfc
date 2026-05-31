@@ -36,7 +36,7 @@
 			<cfset companyName = companiesQ.name[ i ] />
 			<cfif structKeyExists( companiesQ, "careers_source" )><cfset source = lCase( trim( companiesQ.careers_source[ i ] ) ) /><cfelse><cfset source = "" /></cfif>
 			<cfset cfg = parseConfig( companiesQ.ats_config[ i ] ) />
-			<cfif listFindNoCase( "greenhouse,remotive_feed,arbeitnow_feed,adzuna_feed,getcfmljobs_feed,google_cse_feed,cutshort_scan,linkedin_public,foundit_scan,shine_scan,weekday_scan,jooble_feed,expertini_scan,indeed_scan,instahyre_scan,career_page_scan", source ) EQ 0>
+			<cfif listFindNoCase( "greenhouse,remotive_feed,arbeitnow_feed,adzuna_feed,getcfmljobs_feed,google_cse_feed,cutshort_scan,linkedin_public,foundit_scan,shine_scan,weekday_scan,jooble_feed,expertini_scan,indeed_scan,instahyre_scan,remoteok_feed,jobicy_feed,remote_rss_feed,reddit_feed,usajobs_feed,career_page_scan", source ) EQ 0>
 				<cfset arrayAppend( summary.errors, "Skipped (unsupported source '#source#') for company #companyId# (#companyName#)" ) />
 				<cfset variables.loggerService.warn( "Skipped unsupported careers_source=#source# for company #companyId# (#companyName#)" ) />
 				<cfset incrementSourceHealth( summary.sourceHealth, source, "skipped", 0 ) />
@@ -95,6 +95,16 @@
 				<cfset n = ingestIndeedScan( companiesQ.ats_config[ i ] ) />
 			<cfelseif source EQ "instahyre_scan">
 				<cfset n = ingestInstahyreScan( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "remoteok_feed">
+				<cfset n = ingestRemoteOk( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "jobicy_feed">
+				<cfset n = ingestJobicy( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "remote_rss_feed">
+				<cfset n = ingestRemoteRssFeed( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "reddit_feed">
+				<cfset n = ingestReddit( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "usajobs_feed">
+				<cfset n = ingestUsaJobs( companiesQ.ats_config[ i ] ) />
 			<cfelseif source EQ "career_page_scan">
 					<cfset n = ingestCareerPageScan( companyId, companiesQ.careers_url[ i ], companiesQ.ats_config[ i ] ) />
 					<cfset careerScanProcessed = careerScanProcessed + 1 />
@@ -170,6 +180,11 @@
 		<cfargument name="atsConfigJson" type="string" required="true" />
 		<cfif NOT len( trim( arguments.careersUrl ) )><cfreturn 0 /></cfif>
 		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<!--- Known CF product vendors (e.g. ZOLL emsCharts): verify .cfm stack on product site, then track careers even if postings omit "ColdFusion" --->
+		<cfif isCfProductStackCompany( cfg )>
+			<cfset nProduct = ingestCfProductCompanyCareers( arguments.companyId, arguments.careersUrl, cfg ) />
+			<cfif nProduct GT 0><cfreturn nProduct /></cfif>
+		</cfif>
 		<cfif structKeyExists( cfg, "keywords" ) AND isArray( cfg.keywords )>
 			<cfset keywords = cfg.keywords />
 		<cfelse>
@@ -250,6 +265,103 @@
 			rawSource = "career_page_scan"
 		) />
 		<cfreturn 1 />
+	</cffunction>
+
+	<cffunction name="isCfProductStackCompany" access="private" returntype="boolean" output="false">
+		<cfargument name="cfg" type="struct" required="true" />
+		<cfreturn structKeyExists( arguments.cfg, "cf_product_stack" ) AND ( arguments.cfg.cf_product_stack EQ true OR arguments.cfg.cf_product_stack EQ 1 OR lCase( trim( toString( arguments.cfg.cf_product_stack ) ) ) EQ "true" ) />
+	</cffunction>
+
+	<cffunction name="htmlConfirmsColdFusionProduct" access="private" returntype="boolean" output="false">
+		<cfargument name="htmlBody" type="string" required="true" />
+		<cfset s = lCase( arguments.htmlBody ) />
+		<cfif findNoCase( "coldfusion", s ) GT 0 OR findNoCase( "cfml", s ) GT 0 OR findNoCase( "lucee", s ) GT 0><cfreturn true /></cfif>
+		<cfif reFindNoCase( "\.cfm\b", s ) GT 0 OR reFindNoCase( "application/ld\+json[^>]*jobposting", s ) GT 0><cfreturn true /></cfif>
+		<cfreturn false />
+	</cffunction>
+
+	<!--- Companies that ship ColdFusion products (emsCharts, etc.) but rarely say CF in job titles --->
+	<cffunction name="ingestCfProductCompanyCareers" access="private" returntype="numeric" output="false">
+		<cfargument name="companyId" type="numeric" required="true" />
+		<cfargument name="careersUrl" type="string" required="true" />
+		<cfargument name="cfg" type="struct" required="true" />
+		<cfset productUrls = [] />
+		<cfif structKeyExists( arguments.cfg, "product_urls" ) AND isArray( arguments.cfg.product_urls )>
+			<cfset productUrls = arguments.cfg.product_urls />
+		</cfif>
+		<cfset stackConfirmed = false />
+		<cfloop array="#productUrls#" index="pu">
+			<cfset pUrl = trim( toString( pu ) ) />
+			<cfif NOT len( pUrl )><cfcontinue /></cfif>
+			<cftry>
+				<cfset pHtml = variables.httpClientService.getText( pUrl, 20 ) />
+				<cfif htmlConfirmsColdFusionProduct( pHtml )><cfset stackConfirmed = true /><cfbreak /></cfif>
+				<cfcatch type="any"></cfcatch>
+			</cftry>
+		</cfloop>
+		<cfif NOT stackConfirmed>
+			<cfset variables.loggerService.info( "CF product stack: no CF/.cfm evidence on product_urls companyId=#arguments.companyId#" ) />
+			<cfreturn 0 />
+		</cfif>
+		<cftry>
+			<cfset htmlMain = variables.httpClientService.getText( arguments.careersUrl, 28 ) />
+			<cfcatch type="any">
+				<cfset variables.loggerService.warn( "CF product careers fetch failed companyId=#arguments.companyId#: #cfcatch.message#" ) />
+				<cfreturn 0 />
+			</cfcatch>
+		</cftry>
+		<cfif NOT careerTextHasHiringLanguage( lCase( htmlBodyToPlain( htmlMain ) ) )><cfreturn 0 /></cfif>
+		<cfset candidateUrls = collectSameHostJobLikeUrls( htmlMain, arguments.careersUrl, 25 ) />
+		<cfset externalAtsUrls = collectExternalAtsUrls( htmlMain, arguments.careersUrl, 15 ) />
+		<cfset allJobUrls = [] />
+		<cfset seenJob = {} />
+		<cfloop array="#candidateUrls#" index="ju">
+			<cfif structKeyExists( seenJob, ju )><cfcontinue /></cfif>
+			<cfset seenJob[ ju ] = true />
+			<cfset arrayAppend( allJobUrls, ju ) />
+		</cfloop>
+		<cfloop array="#externalAtsUrls#" index="eu">
+			<cfif NOT structKeyExists( seenJob, eu )><cfset seenJob[ eu ] = true /><cfset arrayAppend( allJobUrls, eu ) /></cfif>
+		</cfloop>
+		<cfset stackNote = "Company maintains a ColdFusion/CFML product stack (verified on product site). coldfusion cfml" />
+		<cfset roleTerms = [ "software", "engineer", "developer", "architect", "programmer", "web", "full stack", "fullstack" ] />
+		<cfset n = 0 />
+		<cfset maxJobs = getNumericCfg( arguments.cfg, "max_product_career_jobs", 8 ) />
+		<cfloop array="#allJobUrls#" index="jobUrl">
+			<cfif n GTE maxJobs><cfbreak /></cfif>
+			<cfif NOT isProbableJobPostingUrl( jobUrl, arguments.careersUrl )><cfcontinue /></cfif>
+			<cftry>
+				<cfset jobHtml = variables.httpClientService.getText( jobUrl, 18 ) />
+				<cfcatch type="any"><cfcontinue /></cfcatch>
+			</cftry>
+			<cfset parsed = parseGenericJobHtml( jobHtml, "Open role" ) />
+			<cfset title = len( trim( parsed.title ) ) ? trim( parsed.title ) : "Software role (CF product company)" />
+			<cfset lcTitle = lCase( title ) />
+			<cfset roleMatch = false />
+			<cfloop array="#roleTerms#" index="rt">
+				<cfif findNoCase( rt, lcTitle ) GT 0><cfset roleMatch = true /><cfbreak /></cfif>
+			</cfloop>
+			<cfif NOT roleMatch><cfcontinue /></cfif>
+			<cfset desc = stackNote & " " & parsed.description />
+			<cfif NOT variables.scoringService.shouldPersistJob( title, desc )><cfcontinue /></cfif>
+			<cfset extId = "cfproduct-" & hash( arguments.companyId & "|" & jobUrl ) />
+			<cfset variables.jobService.upsertJob( companyId = arguments.companyId, externalId = extId, title = title, description = left( desc, 12000 ), location = parsed.location, link = jobUrl, rawSource = "career_page_scan" ) />
+			<cfset n = n + 1 />
+			<cfset sleepMs( 300 ) />
+		</cfloop>
+		<cfif n EQ 0>
+			<!--- Fallback: one tracked careers entry when listings are JS-rendered but product stack is confirmed --->
+			<cfset fallbackLink = arguments.careersUrl />
+			<cfif arrayLen( allJobUrls ) GT 0><cfset fallbackLink = allJobUrls[ 1 ] /></cfif>
+			<cfset desc = stackNote & " Active careers portal; product built with ColdFusion (.cfm). Check careers for software roles." />
+			<cfset title = "CF product company — software hiring (verify careers)" />
+			<cfif variables.scoringService.shouldPersistJob( title, desc )>
+				<cfset variables.jobService.upsertJob( companyId = arguments.companyId, externalId = "cfproduct-" & hash( arguments.companyId & "|fallback" ), title = title, description = desc, location = "", link = fallbackLink, rawSource = "career_page_scan" ) />
+				<cfset n = 1 />
+			</cfif>
+		</cfif>
+		<cfif n GT 0><cfset variables.loggerService.info( "CF product company ingest: #n# job(s) companyId=#arguments.companyId#" ) /></cfif>
+		<cfreturn n />
 	</cffunction>
 
 	<cffunction name="htmlBodyToPlain" access="private" returntype="string" output="false">
@@ -530,6 +642,325 @@
 		<cfreturn n />
 	</cffunction>
 
+	<!--- Remote OK public JSON API (credit + link back per API terms) --->
+	<cffunction name="ingestRemoteOk" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="false" default="" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset apiUrl = "https://remoteok.com/api" />
+		<cfif structKeyExists( cfg, "api_url" ) AND len( trim( cfg.api_url ) )>
+			<cfset apiUrl = trim( cfg.api_url ) />
+		</cfif>
+		<cftry>
+			<cfset body = variables.httpClientService.getText( apiUrl, 45 ) />
+			<cfcatch type="any">
+				<cfset variables.loggerService.warn( "Remote OK API fetch failed: #cfcatch.message#" ) />
+				<cfreturn 0 />
+			</cfcatch>
+		</cftry>
+		<cftry>
+			<cfset rows = deserializeJSON( body ) />
+			<cfcatch type="any">
+				<cfset variables.loggerService.warn( "Remote OK JSON parse failed: #cfcatch.message#" ) />
+				<cfreturn 0 />
+			</cfcatch>
+		</cftry>
+		<cfif NOT isArray( rows )><cfreturn 0 /></cfif>
+		<cfset n = 0 />
+		<cfloop array="#rows#" index="jobItem">
+			<cfif NOT isStruct( jobItem ) OR NOT structKeyExists( jobItem, "position" ) OR NOT structKeyExists( jobItem, "id" )><cfcontinue /></cfif>
+			<cfif structKeyExists( jobItem, "company" )><cfset companyName = trim( toString( jobItem.company ) ) /><cfelse><cfset companyName = "Unknown Company" /></cfif>
+			<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, "" ) />
+			<cfset externalId = "remoteok-" & toString( jobItem.id ) />
+			<cfif structKeyExists( jobItem, "description" )><cfset desc = toString( jobItem.description ) /><cfelse><cfset desc = "" /></cfif>
+			<cfif structKeyExists( jobItem, "location" )><cfset location = toString( jobItem.location ) /><cfelse><cfset location = "" /></cfif>
+			<cfif structKeyExists( jobItem, "apply_url" ) AND len( trim( jobItem.apply_url ) )>
+				<cfset link = trim( toString( jobItem.apply_url ) ) />
+			<cfelseif structKeyExists( jobItem, "url" )>
+				<cfset link = trim( toString( jobItem.url ) ) />
+			<cfelse>
+				<cfset link = "" />
+			</cfif>
+			<cfif NOT len( link )><cfcontinue /></cfif>
+			<cfif NOT variables.scoringService.shouldPersistJob( toString( jobItem.position ), desc )><cfcontinue /></cfif>
+			<cfset variables.jobService.upsertJob( companyId = companyId, externalId = externalId, title = jobItem.position, description = desc, location = location, link = link, rawSource = "remoteok" ) />
+			<cfset n = n + 1 />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Remote OK ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!--- Jobicy v2 remote jobs API --->
+	<cffunction name="ingestJobicy" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="false" default="" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset count = getNumericCfg( cfg, "count", 50 ) />
+		<cfset apiUrl = "https://jobicy.com/api/v2/remote-jobs?count=" & count />
+		<cfif structKeyExists( cfg, "tag" ) AND len( trim( cfg.tag ) )>
+			<cfset apiUrl = apiUrl & "&tag=" & urlEncodedFormat( trim( cfg.tag ) ) />
+		</cfif>
+		<cftry>
+			<cfset body = variables.httpClientService.getText( apiUrl, 35 ) />
+			<cfcatch type="any">
+				<cfset variables.loggerService.warn( "Jobicy API fetch failed: #cfcatch.message#" ) />
+				<cfreturn 0 />
+			</cfcatch>
+		</cftry>
+		<cftry>
+			<cfset payload = deserializeJSON( body ) />
+			<cfcatch type="any">
+				<cfset variables.loggerService.warn( "Jobicy JSON parse failed: #cfcatch.message#" ) />
+				<cfreturn 0 />
+			</cfcatch>
+		</cftry>
+		<cfif NOT isStruct( payload ) OR NOT structKeyExists( payload, "jobs" ) OR NOT isArray( payload.jobs )><cfreturn 0 /></cfif>
+		<cfset n = 0 />
+		<cfloop array="#payload.jobs#" index="jobItem">
+			<cfif NOT isStruct( jobItem ) OR NOT structKeyExists( jobItem, "jobTitle" )><cfcontinue /></cfif>
+			<cfif structKeyExists( jobItem, "companyName" )><cfset companyName = trim( toString( jobItem.companyName ) ) /><cfelse><cfset companyName = "Unknown Company" /></cfif>
+			<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, "" ) />
+			<cfif structKeyExists( jobItem, "id" )><cfset externalId = "jobicy-" & toString( jobItem.id ) /><cfelse><cfset externalId = "jobicy-" & hash( companyName & jobItem.jobTitle ) /></cfif>
+			<cfif structKeyExists( jobItem, "jobDescription" )><cfset desc = toString( jobItem.jobDescription ) /><cfelseif structKeyExists( jobItem, "jobExcerpt" )><cfset desc = toString( jobItem.jobExcerpt ) /><cfelse><cfset desc = "" /></cfif>
+			<cfif structKeyExists( jobItem, "jobGeo" )><cfset location = toString( jobItem.jobGeo ) /><cfelse><cfset location = "" /></cfif>
+			<cfif structKeyExists( jobItem, "url" )><cfset link = trim( toString( jobItem.url ) ) /><cfelse><cfset link = "" /></cfif>
+			<cfif NOT len( link )><cfcontinue /></cfif>
+			<cfif NOT variables.scoringService.shouldPersistJob( toString( jobItem.jobTitle ), desc )><cfcontinue /></cfif>
+			<cfset variables.jobService.upsertJob( companyId = companyId, externalId = externalId, title = jobItem.jobTitle, description = desc, location = location, link = link, rawSource = "jobicy" ) />
+			<cfset n = n + 1 />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Jobicy ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!--- Reddit public JSON (no auth). Reads hiring-oriented subreddits/searches, persists CF posts as jobs. --->
+	<cffunction name="ingestReddit" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="false" default="" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset maxPerListing = getNumericCfg( cfg, "max_posts_per_listing", 100 ) />
+		<cfif maxPerListing GT 100><cfset maxPerListing = 100 /></cfif>
+		<cfset reqSleepMs = getNumericCfg( cfg, "request_sleep_ms", 2500 ) />
+		<cfset ua = structKeyExists( cfg, "user_agent" ) AND len( trim( cfg.user_agent ) ) ? trim( cfg.user_agent ) : "web:coldfusion-job-finder:v1.0 (job aggregator; contact: admin)" />
+		<cfif structKeyExists( cfg, "listing_urls" ) AND isArray( cfg.listing_urls ) AND arrayLen( cfg.listing_urls ) GT 0>
+			<cfset listingUrls = cfg.listing_urls />
+		<cfelse>
+			<cfset listingUrls = [
+				"https://www.reddit.com/r/coldfusion/new.json?limit=100",
+				"https://www.reddit.com/r/forhire/search.json?q=coldfusion+OR+cfml+OR+lucee&restrict_sr=1&sort=new&limit=100",
+				"https://www.reddit.com/r/jobbit/search.json?q=coldfusion+OR+cfml&restrict_sr=1&sort=new&limit=100",
+				"https://www.reddit.com/r/remotejs/search.json?q=coldfusion+OR+cfml&restrict_sr=1&sort=new&limit=50",
+				"https://www.reddit.com/search.json?q=coldfusion+hiring+OR+%22coldfusion+developer%22&sort=new&limit=100"
+			] />
+		</cfif>
+		<cfset n = 0 />
+		<cfset seenIds = {} />
+		<cfloop array="#listingUrls#" index="lu">
+			<cfset listU = trim( toString( lu ) ) />
+			<cfif NOT len( listU )><cfcontinue /></cfif>
+			<cftry>
+				<cfset body = variables.httpClientService.getTextWithHeaders( listU, { "User-Agent": ua, "Accept": "application/json" }, 30 ) />
+				<cfset payload = deserializeJSON( body ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Reddit listing fetch/parse failed url=#left( listU, 120 )#: #cfcatch.message#" ) />
+					<cfset sleepMs( reqSleepMs ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cfif NOT isStruct( payload ) OR NOT structKeyExists( payload, "data" ) OR NOT isStruct( payload.data ) OR NOT structKeyExists( payload.data, "children" ) OR NOT isArray( payload.data.children )>
+				<cfset sleepMs( reqSleepMs ) />
+				<cfcontinue />
+			</cfif>
+			<cfset processed = 0 />
+			<cfloop array="#payload.data.children#" index="child">
+				<cfif processed GTE maxPerListing><cfbreak /></cfif>
+				<cfif NOT isStruct( child ) OR NOT structKeyExists( child, "data" ) OR NOT isStruct( child.data )><cfcontinue /></cfif>
+				<cfset post = child.data />
+				<cfset postId = structKeyExists( post, "id" ) ? toString( post.id ) : "" />
+				<cfif NOT len( postId ) OR structKeyExists( seenIds, postId )><cfcontinue /></cfif>
+				<cfset seenIds[ postId ] = true />
+				<cfset processed = processed + 1 />
+				<cfset postTitle = structKeyExists( post, "title" ) ? trim( toString( post.title ) ) : "" />
+				<cfset selfText = structKeyExists( post, "selftext" ) ? trim( toString( post.selftext ) ) : "" />
+				<cfif NOT len( postTitle )><cfcontinue /></cfif>
+				<!--- Skip [For Hire]/seeking-work posts on r/forhire; keep hiring posts --->
+				<cfif findNoCase( "[for hire]", postTitle ) GT 0><cfcontinue /></cfif>
+				<cfif NOT variables.scoringService.shouldPersistJob( postTitle, selfText )><cfcontinue /></cfif>
+				<cfset permalink = structKeyExists( post, "permalink" ) ? "https://www.reddit.com" & toString( post.permalink ) : "" />
+				<cfif structKeyExists( post, "url" ) AND len( trim( toString( post.url ) ) ) AND NOT len( permalink )><cfset permalink = trim( toString( post.url ) ) /></cfif>
+				<cfif NOT len( permalink )><cfcontinue /></cfif>
+				<cfset subreddit = structKeyExists( post, "subreddit" ) ? toString( post.subreddit ) : "reddit" />
+				<cfset companyName = "Reddit r/" & subreddit />
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, "" ) />
+				<cfset externalId = "reddit-" & postId />
+				<cfset variables.jobService.upsertJob(
+					companyId = companyId,
+					externalId = externalId,
+					title = postTitle,
+					description = len( selfText ) ? selfText : postTitle,
+					location = "",
+					link = permalink,
+					rawSource = "reddit"
+				) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( reqSleepMs ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Reddit ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!--- USAJOBS.gov official API. Free; requires Authorization-Key + User-Agent (email) per their docs. Heavy legacy-ColdFusion gov employer. --->
+	<cffunction name="ingestUsaJobs" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="false" default="" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset apiKey = structKeyExists( cfg, "api_key" ) ? trim( cfg.api_key ) : "" />
+		<cfset userAgent = structKeyExists( cfg, "user_agent" ) ? trim( cfg.user_agent ) : "" />
+		<cfif NOT len( apiKey ) OR NOT len( userAgent )>
+			<cfset variables.loggerService.warn( "USAJOBS skipped: set ats_config.api_key (Authorization-Key) and ats_config.user_agent (registered email)." ) />
+			<cfreturn 0 />
+		</cfif>
+		<cfset keywords = [ "ColdFusion", "CFML", "Lucee" ] />
+		<cfif structKeyExists( cfg, "keywords" ) AND isArray( cfg.keywords ) AND arrayLen( cfg.keywords ) GT 0>
+			<cfset keywords = cfg.keywords />
+		</cfif>
+		<cfset perPage = getNumericCfg( cfg, "results_per_page", 50 ) />
+		<cfif perPage GT 500><cfset perPage = 500 /></cfif>
+		<cfset n = 0 />
+		<cfset seenIds = {} />
+		<cfloop array="#keywords#" index="kw">
+			<cfset kwTrim = trim( toString( kw ) ) />
+			<cfif NOT len( kwTrim )><cfcontinue /></cfif>
+			<cfset endpoint = "https://data.usajobs.gov/api/search?Keyword=" & urlEncodedFormat( kwTrim ) & "&ResultsPerPage=" & perPage />
+			<cftry>
+				<cfset body = variables.httpClientService.getTextWithHeaders( endpoint, { "Authorization-Key": apiKey, "User-Agent": userAgent, "Host": "data.usajobs.gov" }, 35 ) />
+				<cfset payload = deserializeJSON( body ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "USAJOBS fetch/parse failed keyword=#kwTrim#: #cfcatch.message#" ) />
+					<cfset sleepMs( 600 ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cfif NOT isStruct( payload ) OR NOT structKeyExists( payload, "SearchResult" ) OR NOT isStruct( payload.SearchResult ) OR NOT structKeyExists( payload.SearchResult, "SearchResultItems" ) OR NOT isArray( payload.SearchResult.SearchResultItems )>
+				<cfset sleepMs( 600 ) />
+				<cfcontinue />
+			</cfif>
+			<cfloop array="#payload.SearchResult.SearchResultItems#" index="item">
+				<cfif NOT isStruct( item ) OR NOT structKeyExists( item, "MatchedObjectDescriptor" ) OR NOT isStruct( item.MatchedObjectDescriptor )><cfcontinue /></cfif>
+				<cfset d = item.MatchedObjectDescriptor />
+				<cfset jobId = structKeyExists( item, "MatchedObjectId" ) ? toString( item.MatchedObjectId ) : "" />
+				<cfif NOT len( jobId ) OR structKeyExists( seenIds, jobId )><cfcontinue /></cfif>
+				<cfset seenIds[ jobId ] = true />
+				<cfset jTitle = structKeyExists( d, "PositionTitle" ) ? trim( toString( d.PositionTitle ) ) : "" />
+				<cfif NOT len( jTitle )><cfcontinue /></cfif>
+				<cfset companyName = structKeyExists( d, "OrganizationName" ) ? trim( toString( d.OrganizationName ) ) : "US Government" />
+				<cfset jLink = structKeyExists( d, "PositionURI" ) ? trim( toString( d.PositionURI ) ) : "" />
+				<cfif NOT len( jLink )><cfcontinue /></cfif>
+				<cfset jLocation = "" />
+				<cfif structKeyExists( d, "PositionLocationDisplay" )><cfset jLocation = trim( toString( d.PositionLocationDisplay ) ) /></cfif>
+				<cfset jDesc = "" />
+				<cfif structKeyExists( d, "UserArea" ) AND isStruct( d.UserArea ) AND structKeyExists( d.UserArea, "Details" ) AND isStruct( d.UserArea.Details )>
+					<cfif structKeyExists( d.UserArea.Details, "JobSummary" )><cfset jDesc = toString( d.UserArea.Details.JobSummary ) /></cfif>
+				</cfif>
+				<cfif NOT len( jDesc ) AND structKeyExists( d, "QualificationSummary" )><cfset jDesc = toString( d.QualificationSummary ) /></cfif>
+				<cfif NOT variables.scoringService.shouldPersistJob( jTitle, jDesc )><cfcontinue /></cfif>
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, "" ) />
+				<cfset externalId = "usajobs-" & jobId />
+				<cfset variables.jobService.upsertJob(
+					companyId = companyId,
+					externalId = externalId,
+					title = jTitle,
+					description = jDesc,
+					location = jLocation,
+					link = jLink,
+					rawSource = "usajobs"
+				) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( 600 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "USAJOBS ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!--- Generic RSS ingest for remote job boards (We Work Remotely, etc.) --->
+	<cffunction name="ingestRemoteRssFeed" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset rawSource = "remote_rss" />
+		<cfif structKeyExists( cfg, "raw_source" ) AND len( trim( cfg.raw_source ) )>
+			<cfset rawSource = lCase( trim( cfg.raw_source ) ) />
+		</cfif>
+		<cfif structKeyExists( cfg, "rss_urls" ) AND isArray( cfg.rss_urls ) AND arrayLen( cfg.rss_urls ) GT 0>
+			<cfset rssUrls = cfg.rss_urls />
+		<cfelse>
+			<cfset rssUrls = [ "https://weworkremotely.com/remote-jobs.rss" ] />
+		</cfif>
+		<cfset n = 0 />
+		<cfset seenLinks = {} />
+		<cfloop array="#rssUrls#" index="feedUrl">
+			<cfset feedU = trim( toString( feedUrl ) ) />
+			<cfif NOT len( feedU )><cfcontinue /></cfif>
+			<cftry>
+				<cfset body = variables.httpClientService.getText( feedU, 30 ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Remote RSS fetch failed url=#feedU#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cftry>
+				<cfset xmlDoc = xmlParse( body ) />
+				<cfset itemNodes = xmlSearch( xmlDoc, "/rss/channel/item" ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Remote RSS parse failed url=#feedU#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cfif NOT isArray( itemNodes )><cfcontinue /></cfif>
+			<cfloop array="#itemNodes#" index="itemNode">
+				<cfset title = getRssXmlText( itemNode, "title" ) />
+				<cfset link = getRssXmlText( itemNode, "link" ) />
+				<cfset desc = getRssXmlText( itemNode, "description" ) />
+				<cfset location = getRssXmlText( itemNode, "region" ) />
+				<cfif NOT len( location )><cfset location = getRssXmlText( itemNode, "location" ) /></cfif>
+				<cfif NOT len( trim( link ) ) OR structKeyExists( seenLinks, link )><cfcontinue /></cfif>
+				<cfset seenLinks[ link ] = true />
+				<cfif NOT len( trim( title ) )><cfcontinue /></cfif>
+				<cfset descPlain = reReplace( desc, "<[^>]+>", " ", "all" ) />
+				<cfset descPlain = trim( reReplace( descPlain, "\s+", " ", "all" ) ) />
+				<cfif NOT variables.scoringService.shouldPersistJob( title, descPlain )><cfcontinue /></cfif>
+				<cfset companyName = extractCompanyFromRssTitle( title ) />
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, "" ) />
+				<cfset externalId = rawSource & "-" & hash( link ) />
+				<cfset variables.jobService.upsertJob( companyId = companyId, externalId = externalId, title = title, description = left( descPlain, 12000 ), location = location, link = link, rawSource = rawSource ) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( 400 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Remote RSS (#rawSource#) ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<cffunction name="getRssXmlText" access="private" returntype="string" output="false">
+		<cfargument name="itemNode" type="any" required="true" />
+		<cfargument name="localName" type="string" required="true" />
+		<cfset nodes = xmlSearch( arguments.itemNode, "./#arguments.localName#/text()" ) />
+		<cfif isArray( nodes ) AND arrayLen( nodes ) GT 0>
+			<cfset v = nodes[ 1 ] />
+			<cfif isStruct( v ) AND structKeyExists( v, "xmlText" )><cfreturn trim( toString( v.xmlText ) ) /></cfif>
+			<cfif isStruct( v ) AND structKeyExists( v, "xmlValue" )><cfreturn trim( toString( v.xmlValue ) ) /></cfif>
+			<cfreturn trim( toString( v ) ) />
+		</cfif>
+		<cfreturn "" />
+	</cffunction>
+
+	<cffunction name="extractCompanyFromRssTitle" access="private" returntype="string" output="false">
+		<cfargument name="title" type="string" required="true" />
+		<cfset t = trim( arguments.title ) />
+		<cfset colonPos = find( ":", t ) />
+		<cfif colonPos GT 1>
+			<cfreturn trim( left( t, colonPos - 1 ) ) />
+		</cfif>
+		<cfreturn "Unknown Company" />
+	</cffunction>
+
 	<!--- https://www.getcfmljobs.com/ — CFML community job board (HTML only; respect rate limits) --->
 	<cffunction name="ingestGetCfmlJobs" access="private" returntype="numeric" output="false">
 		<cfargument name="listingUrl" type="string" required="true" />
@@ -705,6 +1136,57 @@
 		<cfreturn out />
 	</cffunction>
 
+	<!--- Re-fetches jobs stuck under the "Unknown Company" placeholder and reassigns the real employer parsed from the live page. --->
+	<cffunction name="backfillUnknownCompanyJobs" access="public" returntype="struct" output="false">
+		<cfset result = { examined: 0, reassigned: 0, deduped: 0, unresolved: 0, errors: [] } />
+		<cfset jobsQ = variables.jobService.getUnknownCompanyJobs() />
+		<cfset result.examined = jobsQ.recordCount />
+		<cfloop from="1" to="#jobsQ.recordCount#" index="r">
+			<cfset jobId = val( jobsQ.id[ r ] ) />
+			<cfset jobLink = trim( jobsQ.link[ r ] ) />
+			<cfset jobExternalId = trim( jobsQ.external_id[ r ] ) />
+			<cfset src = lCase( trim( jobsQ.raw_source[ r ] ) ) />
+			<cfif NOT len( jobLink )>
+				<cfset result.unresolved = result.unresolved + 1 />
+				<cfcontinue />
+			</cfif>
+			<cftry>
+				<cfset pageHtml = variables.httpClientService.getText( jobLink, 25 ) />
+				<cfif src EQ "getcfmljobs">
+					<cfset parsed = parseGetCfmlJobsJobHtml( pageHtml ) />
+				<cfelse>
+					<cfset parsed = parseGenericJobHtml( pageHtml, "" ) />
+				</cfif>
+				<cfset foundName = trim( parsed.companyName ) />
+				<cfif len( foundName ) AND foundName NEQ "Unknown Company">
+					<cfset newCompanyId = variables.companyService.getOrCreateExternalCompany( foundName, trim( parsed.companyWebsite ) ) />
+					<!--- If the same posting already exists under the resolved employer, this Unknown row is a stale duplicate: remove it. --->
+					<cfif variables.jobService.duplicateJobExists( newCompanyId, jobExternalId, jobId )>
+						<cfset variables.jobService.deleteJobById( jobId ) />
+						<cfset result.deduped = result.deduped + 1 />
+					<cfelse>
+						<cfset variables.jobService.reassignJobCompany( jobId, newCompanyId, trim( parsed.title ) ) />
+						<cfset result.reassigned = result.reassigned + 1 />
+					</cfif>
+				<cfelse>
+					<cfset result.unresolved = result.unresolved + 1 />
+				</cfif>
+				<cfcatch type="any">
+					<cfset result.unresolved = result.unresolved + 1 />
+					<cfset arrayAppend( result.errors, "Job #jobId#: #cfcatch.message#" ) />
+					<cfset variables.loggerService.warn( "Backfill company failed jobId=#jobId# url=#left( jobLink, 120 )#: #cfcatch.message#" ) />
+				</cfcatch>
+			</cftry>
+			<cfset sleepMs( 400 ) />
+		</cfloop>
+		<!--- Drop the placeholder company once nothing references it anymore. --->
+		<cfset result.placeholderRemoved = variables.companyService.purgeEmptyUnknownCompany() />
+		<cfif result.reassigned GT 0 OR result.deduped GT 0>
+			<cfset variables.loggerService.info( "Backfill: reassigned #result.reassigned#, deduped #result.deduped# of #result.examined# Unknown Company job(s)." ) />
+		</cfif>
+		<cfreturn result />
+	</cffunction>
+
 	<cffunction name="ingestAdzuna" access="private" returntype="numeric" output="false">
 		<cfargument name="atsConfigJson" type="string" required="true" />
 		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
@@ -712,11 +1194,18 @@
 			<cfset variables.loggerService.warn( "Adzuna skipped: missing app_id/app_key in ats_config." ) />
 			<cfreturn 0 />
 		</cfif>
-		<cfif structKeyExists( cfg, "country" )><cfset country = lCase( cfg.country ) /><cfelse><cfset country = "gb" /></cfif>
+		<cfif structKeyExists( cfg, "countries" ) AND isArray( cfg.countries ) AND arrayLen( cfg.countries ) GT 0>
+			<cfset countries = cfg.countries />
+		<cfelseif structKeyExists( cfg, "country" ) AND len( trim( toString( cfg.country ) ) )>
+			<cfset countries = [ lCase( trim( toString( cfg.country ) ) ) ] />
+		<cfelse>
+			<cfset countries = [ "us", "gb", "ca", "au", "de", "in", "fr", "nl", "sg", "nz", "at", "ch", "be", "br", "za", "pl" ] />
+		</cfif>
 		<cfset n = 0 />
 		<cfset queries = [ "coldfusion", "cfml", "lucee", "coldbox" ] />
+		<cfloop array="#countries#" index="country">
 		<cfloop array="#queries#" index="term">
-			<cfset endpoint = "https://api.adzuna.com/v1/api/jobs/" & country & "/search/1?app_id=" & urlEncodedFormat( cfg.app_id ) & "&app_key=" & urlEncodedFormat( cfg.app_key ) & "&results_per_page=50&what=" & urlEncodedFormat( term ) />
+			<cfset endpoint = "https://api.adzuna.com/v1/api/jobs/" & lCase( trim( toString( country ) ) ) & "/search/1?app_id=" & urlEncodedFormat( cfg.app_id ) & "&app_key=" & urlEncodedFormat( cfg.app_key ) & "&results_per_page=50&what=" & urlEncodedFormat( term ) />
 			<cfset body = variables.httpClientService.getText( endpoint ) />
 			<cfset payload = deserializeJSON( body ) />
 			<cfif NOT structKeyExists( payload, "results" ) OR NOT isArray( payload.results )><cfcontinue /></cfif>
@@ -736,7 +1225,272 @@
 				<cfset n = n + 1 />
 			</cfloop>
 		</cfloop>
+		</cfloop>
 		<cfreturn n />
+	</cffunction>
+
+	<!--- Global CF Job Watcher: Bing RSS meta-search, fetch job pages, persist when CF rules pass. --->
+	<cffunction name="runCfGlobalWatcher" access="public" returntype="numeric" output="false">
+		<cfset cfgJson = variables.companyService.getFeedAtsConfigJson( "cf_global_watcher" ) />
+		<cfif NOT len( trim( cfgJson ) )>
+			<cfset variables.loggerService.warn( "CF Global Watcher skipped: no cf_global_watcher feed configured." ) />
+			<cfreturn 0 />
+		</cfif>
+		<cfset cfg = parseConfig( cfgJson ) />
+		<cfset maxRunsPerDay = getNumericCfg( cfg, "max_runs_per_day", defaultMaxRunsFor( "cf_global_watcher" ) ) />
+		<cfset minIntervalMinutes = getNumericCfg( cfg, "min_interval_minutes", defaultMinIntervalFor( "cf_global_watcher" ) ) />
+		<cfset quota = variables.sourceQuotaService.canRun( "cf_global_watcher", maxRunsPerDay, minIntervalMinutes ) />
+		<cfif NOT quota.allowed>
+			<cfset variables.loggerService.warn( "CF Global Watcher quota skip: #quota.reason#" ) />
+			<cfreturn 0 />
+		</cfif>
+		<cfset n = ingestCfGlobalWatcher( cfgJson ) />
+		<cfset variables.sourceQuotaService.markRun( "cf_global_watcher" ) />
+		<cfreturn n />
+	</cffunction>
+
+	<cffunction name="ingestCfGlobalWatcher" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset maxQueries = getNumericCfg( cfg, "max_queries_per_run", 20 ) />
+		<cfset maxFetchesPerQuery = getNumericCfg( cfg, "max_url_fetches_per_query", 25 ) />
+		<cfset fetchSleepMs = getNumericCfg( cfg, "fetch_sleep_ms", 450 ) />
+		<cfif structKeyExists( cfg, "global_watcher_queries" ) AND isArray( cfg.global_watcher_queries ) AND arrayLen( cfg.global_watcher_queries ) GT 0>
+			<cfset allQueries = cfg.global_watcher_queries />
+		<cfelseif structKeyExists( cfg, "queries" ) AND isArray( cfg.queries ) AND arrayLen( cfg.queries ) GT 0>
+			<cfset allQueries = cfg.queries />
+		<cfelse>
+			<cfset allQueries = defaultCfGlobalWatcherQueries() />
+		</cfif>
+		<cfset braveApiKey = structKeyExists( cfg, "brave_api_key" ) ? trim( toString( cfg.brave_api_key ) ) : "" />
+		<cfset startIdx = ( ( dayOfYear( now() ) - 1 ) mod arrayLen( allQueries ) ) + 1 />
+		<cfset n = 0 />
+		<cfset queriesRun = 0 />
+		<cfset seenUrls = {} />
+		<cfloop from="0" to="#arrayLen( allQueries ) - 1#" index="offset">
+			<cfif queriesRun GTE maxQueries><cfbreak /></cfif>
+			<cfset qi = ( ( startIdx - 1 + offset ) mod arrayLen( allQueries ) ) + 1 />
+			<cfset qText = trim( toString( allQueries[ qi ] ) ) />
+			<cfif NOT len( qText )><cfcontinue /></cfif>
+			<cfset queriesRun = queriesRun + 1 />
+			<cfset hits = [] />
+			<cfset bingFailed = false />
+			<cftry>
+				<cfset hits = fetchBingRssResults( qText ) />
+				<cfcatch type="any">
+					<cfset bingFailed = true />
+					<cfset variables.loggerService.warn( "CF Global Watcher Bing RSS failed query=#left( qText, 100 )#: #cfcatch.message#" ) />
+				</cfcatch>
+			</cftry>
+			<!--- Brave Search fallback: use when Bing throttles/fails or returns nothing and a key is set --->
+			<cfif len( braveApiKey ) AND ( bingFailed OR arrayLen( hits ) EQ 0 )>
+				<cftry>
+					<cfset braveHits = fetchBraveResults( qText, braveApiKey ) />
+					<cfif arrayLen( braveHits ) GT 0>
+						<cfset hits = braveHits />
+						<cfset variables.loggerService.info( "CF Global Watcher Brave fallback used for query=#left( qText, 80 )# (#arrayLen( braveHits )# hits)." ) />
+					</cfif>
+					<cfcatch type="any">
+						<cfset variables.loggerService.warn( "CF Global Watcher Brave fallback failed query=#left( qText, 80 )#: #cfcatch.message#" ) />
+					</cfcatch>
+				</cftry>
+			</cfif>
+			<cfif bingFailed AND arrayLen( hits ) EQ 0><cfcontinue /></cfif>
+			<cfset fetchedThisQuery = 0 />
+			<cfloop array="#hits#" index="hit">
+				<cfif fetchedThisQuery GTE maxFetchesPerQuery><cfbreak /></cfif>
+				<cfif NOT isStruct( hit ) OR NOT structKeyExists( hit, "url" )><cfcontinue /></cfif>
+				<cfset link = normalizeWatcherUrl( trim( toString( hit.url ) ) ) />
+				<cfif NOT len( link ) OR structKeyExists( seenUrls, link )><cfcontinue /></cfif>
+				<cfset seenUrls[ link ] = true />
+				<cfif NOT isProbableJobPostingUrl( link, "" )><cfcontinue /></cfif>
+				<cfset hitTitle = structKeyExists( hit, "title" ) ? trim( toString( hit.title ) ) : "" />
+				<cfset hitSnippet = structKeyExists( hit, "snippet" ) ? trim( toString( hit.snippet ) ) : "" />
+				<cfset fetchedThisQuery = fetchedThisQuery + 1 />
+				<cfif ingestSearchHitAsJob( link, hitTitle, hitSnippet, "cf_global_watcher" )>
+					<cfset n = n + 1 />
+				</cfif>
+				<cfset sleepMs( fetchSleepMs ) />
+			</cfloop>
+			<cfset sleepMs( 600 ) />
+		</cfloop>
+		<cfif n GT 0>
+			<cfset variables.loggerService.info( "CF Global Watcher: upserted #n# job(s) from #queriesRun# queries." ) />
+		</cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<cffunction name="ingestSearchHitAsJob" access="private" returntype="boolean" output="false">
+		<cfargument name="jobUrl" type="string" required="true" />
+		<cfargument name="fallbackTitle" type="string" required="false" default="" />
+		<cfargument name="fallbackSnippet" type="string" required="false" default="" />
+		<cfargument name="rawSource" type="string" required="false" default="cf_global_watcher" />
+		<cfset link = normalizeWatcherUrl( trim( arguments.jobUrl ) ) />
+		<cfif NOT len( link )><cfreturn false /></cfif>
+		<cftry>
+			<cfset jobHtml = variables.httpClientService.getText( link, 25 ) />
+			<cfcatch type="any">
+				<cfset variables.loggerService.warn( "CF watcher job fetch failed url=#left( link, 120 )#: #cfcatch.message#" ) />
+				<cfreturn false />
+			</cfcatch>
+		</cftry>
+		<cfset parsed = parseGenericJobHtml( jobHtml, arguments.fallbackTitle ) />
+		<cfif NOT len( trim( parsed.title ) ) AND len( trim( arguments.fallbackTitle ) )>
+			<cfset parsed.title = trim( arguments.fallbackTitle ) />
+		</cfif>
+		<cfif NOT len( trim( parsed.description ) ) AND len( trim( arguments.fallbackSnippet ) )>
+			<cfset parsed.description = trim( arguments.fallbackSnippet ) />
+		</cfif>
+		<cfif NOT len( trim( parsed.title ) )><cfreturn false /></cfif>
+		<cfif NOT variables.scoringService.shouldPersistJob( parsed.title, parsed.description )><cfreturn false /></cfif>
+		<cfset companyName = len( trim( parsed.companyName ) ) ? trim( parsed.companyName ) : googleCseCompanyLabel( link, parsed.title, parsed.description ) />
+		<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, parsed.companyWebsite ) />
+		<cfset externalId = "cfwatch-" & hash( lCase( link ) ) />
+		<cfset variables.jobService.upsertJob(
+			companyId = companyId,
+			externalId = externalId,
+			title = parsed.title,
+			description = parsed.description,
+			location = parsed.location,
+			link = link,
+			rawSource = arguments.rawSource
+		) />
+		<cfreturn true />
+	</cffunction>
+
+	<cffunction name="fetchBingRssResults" access="private" returntype="array" output="false">
+		<cfargument name="queryText" type="string" required="true" />
+		<cfset requestUrl = "https://www.bing.com/search?format=rss&q=" & urlEncodedFormat( arguments.queryText ) />
+		<cfset body = variables.httpClientService.getText( requestUrl, 15 ) />
+		<cfset xmlDoc = xmlParse( body ) />
+		<cfset itemNodes = xmlSearch( xmlDoc, "/rss/channel/item" ) />
+		<cfset out = [] />
+		<cfif isArray( itemNodes )>
+			<cfloop array="#itemNodes#" index="itemNode">
+				<cfset title = bingRssXmlText( xmlSearch( itemNode, "title/text()" ) ) />
+				<cfset link = bingRssXmlText( xmlSearch( itemNode, "link/text()" ) ) />
+				<cfset snippet = bingRssXmlText( xmlSearch( itemNode, "description/text()" ) ) />
+				<cfif len( trim( link ) )>
+					<cfset arrayAppend( out, { title: title, url: link, snippet: snippet } ) />
+				</cfif>
+			</cfloop>
+		</cfif>
+		<cfreturn out />
+	</cffunction>
+
+	<!--- Brave Search API (free tier ~2k queries/mo). Returns web results as job-URL candidates. --->
+	<cffunction name="fetchBraveResults" access="private" returntype="array" output="false">
+		<cfargument name="queryText" type="string" required="true" />
+		<cfargument name="apiKey" type="string" required="true" />
+		<cfset endpoint = "https://api.search.brave.com/res/v1/web/search?count=20&q=" & urlEncodedFormat( arguments.queryText ) />
+		<cfset body = variables.httpClientService.getTextWithHeaders(
+			endpoint,
+			{ "X-Subscription-Token": arguments.apiKey, "Accept": "application/json", "Accept-Encoding": "gzip" },
+			20
+		) />
+		<cfset payload = deserializeJSON( body ) />
+		<cfset out = [] />
+		<cfif isStruct( payload ) AND structKeyExists( payload, "web" ) AND isStruct( payload.web ) AND structKeyExists( payload.web, "results" ) AND isArray( payload.web.results )>
+			<cfloop array="#payload.web.results#" index="r">
+				<cfif NOT isStruct( r ) OR NOT structKeyExists( r, "url" )><cfcontinue /></cfif>
+				<cfset rUrl = trim( toString( r.url ) ) />
+				<cfif NOT len( rUrl )><cfcontinue /></cfif>
+				<cfset rTitle = structKeyExists( r, "title" ) ? trim( toString( r.title ) ) : "" />
+				<cfset rDesc = structKeyExists( r, "description" ) ? trim( toString( r.description ) ) : "" />
+				<cfset arrayAppend( out, { title: rTitle, url: rUrl, snippet: rDesc } ) />
+			</cfloop>
+		</cfif>
+		<cfreturn out />
+	</cffunction>
+
+	<cffunction name="bingRssXmlText" access="private" returntype="string" output="false">
+		<cfargument name="nodes" type="any" required="true" />
+		<cfif isArray( arguments.nodes ) AND arrayLen( arguments.nodes ) GT 0>
+			<cfset firstNode = arguments.nodes[ 1 ] />
+			<cfif isStruct( firstNode ) AND structKeyExists( firstNode, "xmlText" )>
+				<cfset rawValue = toString( firstNode.xmlText ) />
+			<cfelseif isStruct( firstNode ) AND structKeyExists( firstNode, "xmlValue" )>
+				<cfset rawValue = toString( firstNode.xmlValue ) />
+			<cfelse>
+				<cfset rawValue = toString( firstNode ) />
+			</cfif>
+			<cfset rawValue = reReplaceNoCase( rawValue, "(?is)<\?xml[^>]*\?>", "", "all" ) />
+			<cfset rawValue = replace( rawValue, "<![CDATA[", "", "all" ) />
+			<cfset rawValue = replace( rawValue, "]]>", "", "all" ) />
+			<cfreturn trim( rawValue ) />
+		</cfif>
+		<cfreturn "" />
+	</cffunction>
+
+	<cffunction name="normalizeWatcherUrl" access="private" returntype="string" output="false">
+		<cfargument name="urlText" type="string" required="true" />
+		<cfset u = trim( arguments.urlText ) />
+		<cfif NOT len( u )><cfreturn "" /></cfif>
+		<cfif findNoCase( "bing.com/aclick", u ) OR findNoCase( "www.bing.com/ck/a", u )>
+			<cfset ampPos = find( "&amp;u=", u ) />
+			<cfif ampPos EQ 0><cfset ampPos = find( "&u=", u ) /></cfif>
+			<cfif ampPos GT 0>
+				<cfset startPos = ampPos + ( find( "&amp;u=", u ) GT 0 ? 6 : 3 ) />
+				<cfset rest = mid( u, startPos, len( u ) ) />
+				<cfset endPos = find( "&", rest ) />
+				<cfif endPos GT 0><cfset rest = left( rest, endPos - 1 ) /></cfif>
+				<cftry>
+					<cfset decoded = urlDecode( rest ) />
+					<cfif len( trim( decoded ) ) AND ( left( decoded, 7 ) EQ "http://" OR left( decoded, 8 ) EQ "https://" )>
+						<cfset u = decoded />
+					</cfif>
+					<cfcatch type="any"></cfcatch>
+				</cftry>
+			</cfif>
+		</cfif>
+		<cfreturn u />
+	</cffunction>
+
+	<cffunction name="defaultCfGlobalWatcherQueries" access="private" returntype="array" output="false">
+		<cfreturn [
+			"""coldfusion"" developer job",
+			"""cfml"" developer hiring",
+			"""lucee"" developer job",
+			"""coldbox"" developer job posting",
+			"full stack developer coldfusion backend job",
+			"fullstack cfml developer hiring",
+			"coldfusion developer remote",
+			"cfml developer Europe job",
+			"coldfusion developer Australia hiring",
+			"coldfusion developer Canada job",
+			"cfml developer United Kingdom",
+			"coldfusion developer Singapore job",
+			"coldfusion site:boards.greenhouse.io",
+			"cfml site:jobs.lever.co",
+			"coldfusion site:myworkdayjobs.com",
+			"cfml site:jobs.ashbyhq.com",
+			"coldfusion site:boards.greenhouse.io embed job",
+			"coldfusion site:linkedin.com/jobs",
+			"cfml site:indeed.com viewjob",
+			"coldfusion site:glassdoor.com job",
+			"lucee site:stackoverflow.com/jobs",
+			"coldfusion site:smartrecruiters.com",
+			"cfml site:jobvite.com",
+			"coldfusion site:icims.com jobs",
+			"coldfusion developer site:remoteok.com",
+			"cfml site:weworkremotely.com",
+			"coldfusion site:jobicy.com",
+			"coldfusion site:arbeitnow.com",
+			"cfml developer site:remotive.com",
+			"coldfusion site:wellfound.com jobs",
+			"coldfusion site:simplyhired.com",
+			"cfml site:monster.com job",
+			"coldfusion site:careerbuilder.com",
+			"coldfusion developer site:ziprecruiter.com",
+			"cfml developer site:seek.com.au",
+			"coldfusion site:totaljobs.com",
+			"cfml developer site:stepstone.de",
+			"coldfusion developer site:naukri.com",
+			"cfml developer site:foundit.in",
+			"coldfusion site:instahyre.com",
+			"mura cms developer job hiring",
+			"adobe coldfusion developer job worldwide"
+		] />
 	</cffunction>
 
 	<!--- Google Programmable Search Engine (Custom Search JSON API). Use for web + site-scoped queries (e.g. LinkedIn jobs, Instahyre) when api_key + cx are set. --->
@@ -783,11 +1537,26 @@
 				<cfset link = trim( toString( item.link ) ) />
 				<cfset jt = structKeyExists( item, "title" ) ? trim( toString( item.title ) ) : "" />
 				<cfset sn = structKeyExists( item, "snippet" ) ? trim( toString( item.snippet ) ) : "" />
-				<cfif NOT variables.scoringService.shouldPersistJob( jt, sn )><cfcontinue /></cfif>
-				<cfset companyName = googleCseCompanyLabel( link, jt, sn ) />
+				<cfset useTitle = jt />
+				<cfset useDesc = sn />
+				<cfset useLocation = "" />
+				<cfif isProbableJobPostingUrl( link, "" )>
+					<cftry>
+						<cfset jobHtml = variables.httpClientService.getText( link, 25 ) />
+						<cfset parsed = parseGenericJobHtml( jobHtml, jt ) />
+						<cfif len( trim( parsed.title ) )><cfset useTitle = parsed.title /></cfif>
+						<cfif len( trim( parsed.description ) )><cfset useDesc = parsed.description /></cfif>
+						<cfif len( trim( parsed.location ) )><cfset useLocation = parsed.location /></cfif>
+						<cfcatch type="any">
+							<cfset variables.loggerService.warn( "Google CSE full-page fetch failed url=#left( link, 100 )#: #cfcatch.message#" ) />
+						</cfcatch>
+					</cftry>
+				</cfif>
+				<cfif NOT variables.scoringService.shouldPersistJob( useTitle, useDesc )><cfcontinue /></cfif>
+				<cfset companyName = googleCseCompanyLabel( link, useTitle, useDesc ) />
 				<cfset companyId = variables.companyService.getOrCreateExternalCompany( companyName, "" ) />
 				<cfset externalId = "gcs-" & hash( lCase( link ) ) />
-				<cfset variables.jobService.upsertJob( companyId = companyId, externalId = externalId, title = len( jt ) ? jt : "Job (Google search)", description = sn, location = "", link = link, rawSource = "google_cse" ) />
+				<cfset variables.jobService.upsertJob( companyId = companyId, externalId = externalId, title = len( useTitle ) ? useTitle : "Job (Google search)", description = useDesc, location = useLocation, link = link, rawSource = "google_cse" ) />
 				<cfset n = n + 1 />
 			</cfloop>
 			<cfset sleepMs( 400 ) />
@@ -1166,15 +1935,22 @@
 			<cfset variables.loggerService.warn( "Jooble: no api_key configured, skipping." ) />
 			<cfreturn 0 />
 		</cfif>
-		<cfset loc = structKeyExists( cfg, "location" ) ? cfg.location : "India" />
 		<cfset keywords = [ "ColdFusion", "CFML", "Lucee", "full stack coldfusion" ] />
 		<cfif structKeyExists( cfg, "keywords" ) AND isArray( cfg.keywords )>
 			<cfset keywords = cfg.keywords />
 		</cfif>
+		<cfif structKeyExists( cfg, "locations" ) AND isArray( cfg.locations ) AND arrayLen( cfg.locations ) GT 0>
+			<cfset locations = cfg.locations />
+		<cfelseif structKeyExists( cfg, "location" )>
+			<cfset locations = [ cfg.location ] />
+		<cfelse>
+			<cfset locations = [ "Remote", "United States", "United Kingdom", "Canada", "Australia", "Germany", "India" ] />
+		</cfif>
 		<cfset n = 0 />
 		<cfset seenLinks = {} />
+		<cfloop array="#locations#" index="loc">
 		<cfloop array="#keywords#" index="kw">
-			<cfset body = serializeJSON( { "keywords": kw, "location": loc, "page": "1" } ) />
+			<cfset body = serializeJSON( { "keywords": kw, "location": trim( toString( loc ) ), "page": "1" } ) />
 			<cftry>
 				<cfhttp url="https://jooble.org/api/#apiKey#" method="POST" result="httpRes" timeout="30">
 					<cfhttpparam type="header" name="Content-Type" value="application/json" />
@@ -1210,6 +1986,7 @@
 				</cfcatch>
 			</cftry>
 			<cfset sleepMs( 500 ) />
+		</cfloop>
 		</cfloop>
 		<cfif n GT 0><cfset variables.loggerService.info( "Jooble ingest: upserted #n# job(s)." ) /></cfif>
 		<cfreturn n />
@@ -1595,7 +2372,8 @@
 	<cffunction name="defaultMaxRunsFor" access="private" returntype="numeric" output="false">
 		<cfargument name="source" type="string" required="true" />
 		<cfif arguments.source EQ "adzuna_feed"><cfreturn 1 /></cfif>
-		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan"><cfreturn 2 /></cfif>
+		<cfif arguments.source EQ "cf_global_watcher"><cfreturn 2 /></cfif>
+		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed"><cfreturn 2 /></cfif>
 		<cfreturn 1 />
 	</cffunction>
 
@@ -1603,14 +2381,15 @@
 		<cfargument name="source" type="string" required="true" />
 		<cfif arguments.source EQ "adzuna_feed"><cfreturn 1440 /></cfif>
 		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "getcfmljobs_feed"><cfreturn 360 /></cfif>
-		<cfif arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan"><cfreturn 720 /></cfif>
+		<cfif arguments.source EQ "cf_global_watcher"><cfreturn 720 /></cfif>
+		<cfif arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed"><cfreturn 720 /></cfif>
 		<cfreturn 1440 />
 	</cffunction>
 
 	<cffunction name="buildSourceKey" access="private" returntype="string" output="false">
 		<cfargument name="source" type="string" required="true" />
 		<cfargument name="companyId" type="numeric" required="true" />
-		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "adzuna_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan">
+		<cfif arguments.source EQ "cf_global_watcher" OR arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "adzuna_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed">
 			<cfreturn arguments.source />
 		</cfif>
 		<cfreturn arguments.source & ":" & arguments.companyId />
@@ -1676,7 +2455,14 @@
 	<cffunction name="isProbableJobPostingUrl" access="private" returntype="boolean" output="false">
 		<cfargument name="jobUrl" type="string" required="true" />
 		<cfargument name="careersUrl" type="string" required="true" />
-		<cfif NOT len( trim( arguments.jobUrl ) ) OR NOT len( trim( arguments.careersUrl ) )>
+		<cfif NOT len( trim( arguments.jobUrl ) )>
+			<cfreturn false />
+		</cfif>
+		<cfset u = lCase( trim( arguments.jobUrl ) ) />
+		<cfif findNoCase( "/job", u ) GT 0 OR findNoCase( "/jobs/", u ) GT 0 OR findNoCase( "/jobs/view/", u ) GT 0 OR findNoCase( "/jobs/search", u ) GT 0 OR findNoCase( "/job-search", u ) GT 0 OR findNoCase( "viewjob", u ) GT 0 OR findNoCase( "gh_jid", u ) GT 0 OR findNoCase( "?job=", u ) GT 0 OR findNoCase( "&job=", u ) GT 0 OR findNoCase( "requisition", u ) GT 0 OR findNoCase( "myworkdayjobs.com", u ) GT 0 OR findNoCase( "lever.co", u ) GT 0 OR findNoCase( "boards.greenhouse.io", u ) GT 0 OR findNoCase( "job-boards.greenhouse.io", u ) GT 0 OR findNoCase( "greenhouse.io/embed", u ) GT 0 OR findNoCase( "smartrecruiters.com", u ) GT 0 OR findNoCase( "ashbyhq.com", u ) GT 0 OR findNoCase( "icims.com", u ) GT 0 OR findNoCase( "taleo", u ) GT 0 OR findNoCase( "brassring", u ) GT 0 OR findNoCase( "successfactors", u ) GT 0 OR findNoCase( "jobvite.com", u ) GT 0 OR findNoCase( "bamboohr.com", u ) GT 0 OR findNoCase( "rippling.com", u ) GT 0 OR findNoCase( "darwinbox", u ) GT 0 OR findNoCase( "cutshort.io", u ) GT 0 OR findNoCase( "/position/", u ) GT 0 OR findNoCase( "/opening/", u ) GT 0 OR findNoCase( "/vacancy", u ) GT 0 OR findNoCase( "/opportunit", u ) GT 0 OR findNoCase( "/apply", u ) GT 0 OR findNoCase( "glassdoor.", u ) GT 0 OR findNoCase( "indeed.", u ) GT 0 OR findNoCase( "linkedin.com/jobs", u ) GT 0>
+			<cfreturn true />
+		</cfif>
+		<cfif NOT len( trim( arguments.careersUrl ) )>
 			<cfreturn false />
 		</cfif>
 		<cftry>
@@ -1688,10 +2474,6 @@
 		</cftry>
 		<cfif normalizeUrlForCompare( ju.toString() ) EQ normalizeUrlForCompare( jc.toString() )>
 			<cfreturn false />
-		</cfif>
-		<cfset u = lCase( trim( arguments.jobUrl ) ) />
-		<cfif findNoCase( "/job", u ) GT 0 OR findNoCase( "/jobs/", u ) GT 0 OR findNoCase( "/jobs/search", u ) GT 0 OR findNoCase( "/job-search", u ) GT 0 OR findNoCase( "gh_jid", u ) GT 0 OR findNoCase( "?job=", u ) GT 0 OR findNoCase( "&job=", u ) GT 0 OR findNoCase( "requisition", u ) GT 0 OR findNoCase( "myworkdayjobs.com", u ) GT 0 OR findNoCase( "lever.co", u ) GT 0 OR findNoCase( "boards.greenhouse.io", u ) GT 0 OR findNoCase( "job-boards.greenhouse.io", u ) GT 0 OR findNoCase( "greenhouse.io/embed", u ) GT 0 OR findNoCase( "smartrecruiters.com", u ) GT 0 OR findNoCase( "ashbyhq.com", u ) GT 0 OR findNoCase( "icims.com", u ) GT 0 OR findNoCase( "taleo", u ) GT 0 OR findNoCase( "brassring", u ) GT 0 OR findNoCase( "successfactors", u ) GT 0 OR findNoCase( "jobvite.com", u ) GT 0 OR findNoCase( "bamboohr.com", u ) GT 0 OR findNoCase( "rippling.com", u ) GT 0 OR findNoCase( "darwinbox", u ) GT 0 OR findNoCase( "cutshort.io", u ) GT 0 OR findNoCase( "/position/", u ) GT 0 OR findNoCase( "/opening/", u ) GT 0 OR findNoCase( "/vacancy", u ) GT 0 OR findNoCase( "/opportunit", u ) GT 0 OR findNoCase( "/apply", u ) GT 0>
-			<cfreturn true />
 		</cfif>
 		<cfif ju.getHost() EQ jc.getHost()>
 			<cfset p = lCase( ju.getPath() ) />

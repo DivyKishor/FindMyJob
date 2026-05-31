@@ -3,6 +3,7 @@
 <cfparam name="url.keyword" default="" />
 <cfparam name="url.location" default="" />
 <cfparam name="url.min_score" default="0" />
+<cfparam name="url.source" default="" />
 <cfparam name="url.company_id" default="0" />
 <cfparam name="url.jobs_page" default="1" />
 <cfparam name="url.jobs_page_size" default="25" />
@@ -18,6 +19,7 @@
 <cfset keyword = trim( url.keyword ) />
 <cfset locationKeyword = trim( url.location ) />
 <cfset minScore = val( url.min_score ) />
+<cfset rawSourceFilter = trim( url.source ) />
 <cfset companyId = val( url.company_id ) />
 <cfset jobsPage = val( url.jobs_page ) />
 <cfset jobsPageSize = val( url.jobs_page_size ) />
@@ -45,7 +47,7 @@
 
 <cftry>
 	<cfset companies = application.companyService.list( companiesSortBy, companiesSortDir ) />
-	<cfset jobsData = application.jobService.listPaged( companyId, keyword, minScore, jobsPage, jobsPageSize, jobsSortBy, jobsSortDir, locationKeyword ) />
+	<cfset jobsData = application.jobService.listPaged( companyId, keyword, minScore, jobsPage, jobsPageSize, jobsSortBy, jobsSortDir, locationKeyword, rawSourceFilter ) />
 	<cfset alertsData = application.alertService.listAlertsPaged( alertsPage, alertsPageSize, alertsSortBy, alertsSortDir ) />
 	<cfset runInfo = application.runStatusService.getLatestRun() />
 	<cfset totalCompanies = arrayLen( companies ) />
@@ -63,7 +65,7 @@
 </cftry>
 
 	<!--- Core filter + each sort dimension once. Sort header URLs omit their own pair so the clicked values are the only copy (duplicate query keys broke sort on Lucee). --->
-<cfset filterCoreNoLocation = "keyword=#urlEncodedFormat( keyword )#&min_score=#minScore#&company_id=#companyId#&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#" />
+<cfset filterCoreNoLocation = "keyword=#urlEncodedFormat( keyword )#&min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#" />
 <cfset filterLocation = "location=#urlEncodedFormat( locationKeyword )#" />
 <cfset filterCore = "#filterCoreNoLocation#&#filterLocation#" />
 <cfset filterJobsSort = "jobs_sort_by=#urlEncodedFormat( jobsData.sortBy )#&jobs_sort_dir=#urlEncodedFormat( jobsData.sortDir )#" />
@@ -71,7 +73,7 @@
 <cfset filterCompaniesSort = "companies_sort_by=#urlEncodedFormat( companiesSortBy )#&companies_sort_dir=#urlEncodedFormat( companiesSortDir )#" />
 <cfset baseFilter = "#filterCore#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#" />
 <cfset baseFilterNoLocation = "#filterCoreNoLocation#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#" />
-<cfset filterCoreNoKeyword = "min_score=#minScore#&company_id=#companyId#&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#" />
+<cfset filterCoreNoKeyword = "min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#" />
 <cfset baseFilterNoKeyword = "#filterCoreNoKeyword#&#filterLocation#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#" />
 <cfset jobsSortPrefix = "#indexUrl#?#filterCore#&#filterCompaniesSort#&#filterAlertsSort#&jobs_page=1&alerts_page=#val( alertsData.page )#" />
 <cfset alertsSortPrefix = "#indexUrl#?#filterCore#&#filterJobsSort#&#filterCompaniesSort#&jobs_page=#val( jobsData.page )#&alerts_page=1" />
@@ -110,7 +112,7 @@
 		<div class="d-flex justify-content-between align-items-center mb-3">
 			<div>
 				<h1 class="h3 mb-1">ColdFusion Job Finder <span class="badge bg-success">India &amp; Remote</span></h1>
-				<div class="text-secondary">ColdFusion / CFML / Lucee <strong>&amp; Full-Stack (CF backend)</strong> jobs from LinkedIn, Cutshort, GetCFMLJobs, Adzuna India, Remotive, ArbeitNow, Greenhouse ATS, and career page scans. <strong>Score 80+</strong> = India-based or truly remote. Score 50 = CF match but US/location-restricted. <a href="#appBasePath#discovery-signals.cfm" target="_blank" rel="noopener">Discovery signals</a></div>
+				<div class="text-secondary">ColdFusion / CFML / Lucee <strong>&amp; Full-Stack (CF backend)</strong> jobs from the <strong>Global CF Watcher</strong> (open web), LinkedIn, Cutshort, GetCFMLJobs, Adzuna (multi-country), Remotive, Remote OK, We Work Remotely, Jobicy, ArbeitNow, India boards, and career page scans. <strong>Score 80+</strong> = India-based or truly remote. Score 50 = CF match but US/location-restricted. <a href="#appBasePath#discovery-signals.cfm" target="_blank" rel="noopener">Discovery signals</a></div>
 			</div>
 			<div class="text-end">
 				<a class="btn btn-sm btn-outline-primary me-1" href="#appBasePath#tasks/seed.cfm">Seed</a>
@@ -125,7 +127,7 @@
 		</cfif>
 
 		<div class="alert alert-info small mb-3">
-			<span class="fw-semibold">Scoring (v3):</span> Jobs are scored 0-100. <strong>100</strong> = CF keyword + India location or global-remote confirmed. <strong>80</strong> = CF + likely remote-friendly. <strong>50</strong> = CF match but location unclear. <strong>20</strong> = CF match but US work auth / clearance required. <strong>Full-stack</strong> postings with ColdFusion/CFML as backend are also captured. Use <strong>Score 70+</strong> filter to see only India-eligible postings. Sources: LinkedIn (India + remote), Cutshort, GetCFMLJobs, Adzuna India, Remotive, ArbeitNow, Greenhouse, career page scans.
+			<span class="fw-semibold">Scoring (v3):</span> Jobs are scored 0-100. <strong>100</strong> = CF keyword + India location or global-remote confirmed. <strong>80</strong> = CF + likely remote-friendly. <strong>50</strong> = CF match but location unclear. <strong>20</strong> = CF match but US work auth / clearance required. <strong>Full-stack</strong> postings with ColdFusion/CFML as backend are also captured. Use <strong>Score 70+</strong> filter to see only India-eligible postings. Sources: Global CF Watcher (open web + Brave fallback), LinkedIn, Cutshort, GetCFMLJobs, Adzuna (16 countries), Remotive, Remote OK, We Work Remotely, Jobicy, ArbeitNow, Foundit, Shine, Indeed, Expertini, Instahyre, Reddit, USAJOBS.gov, Greenhouse, career page scans (+ Google CSE for 25+ remote platforms).
 		</div>
 
 		<div class="card shadow-sm mb-3">
@@ -174,6 +176,7 @@
 					<input type="hidden" name="alerts_sort_dir" value="#encodeForHTMLAttribute( alertsData.sortDir )#" />
 					<input type="hidden" name="companies_sort_by" value="#encodeForHTMLAttribute( companiesSortBy )#" />
 					<input type="hidden" name="companies_sort_dir" value="#encodeForHTMLAttribute( companiesSortDir )#" />
+					<input type="hidden" name="source" value="#encodeForHTMLAttribute( rawSourceFilter )#" />
 					<div class="col-md-3">
 						<label class="form-label">Keyword</label>
 						<input class="form-control" type="text" name="keyword" value="#encodeForHTMLAttribute( keyword )#" />
@@ -209,7 +212,8 @@
 					<a href="#indexUrl#?#baseFilterNoLocation#&location=#urlEncodedFormat( "Hyderabad" )#&jobs_page=1">Hyderabad</a> |
 					<a href="#indexUrl#?#baseFilterNoLocation#&location=#urlEncodedFormat( "remote" )#&jobs_page=1">Remote</a> |
 					<a href="#indexUrl#?#baseFilterNoKeyword#&keyword=#urlEncodedFormat( "full stack" )#&jobs_page=1">Full Stack</a> |
-					<a href="#indexUrl#?#baseFilterNoLocation#&location=&min_score=0&jobs_page=1">Clear all</a>
+					<a href="#indexUrl#?keyword=&location=&min_score=0&source=#urlEncodedFormat( "cf_global_watcher" )#&company_id=0&jobs_page=1&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#" class="btn btn-sm btn-outline-primary">Global CF (any location)</a> |
+					<a href="#indexUrl#?#baseFilterNoLocation#&location=&min_score=0&source=&jobs_page=1">Clear all</a>
 				</div>
 			</div>
 		</div>

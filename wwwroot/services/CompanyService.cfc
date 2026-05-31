@@ -56,7 +56,9 @@
 			"SELECT id, name, website, careers_url, careers_source, ats_config, cf_likelihood_score
 			 FROM companies
 			 WHERE careers_source <> 'external_feed'
+			   AND careers_source <> 'cf_global_watcher'
 			 ORDER BY CASE careers_source
+					WHEN 'cf_global_watcher' THEN -1
 					WHEN 'remotive_feed' THEN 0
 					WHEN 'arbeitnow_feed' THEN 0
 					WHEN 'getcfmljobs_feed' THEN 0
@@ -71,6 +73,11 @@
 				WHEN 'expertini_scan' THEN 0
 				WHEN 'indeed_scan' THEN 0
 				WHEN 'instahyre_scan' THEN 0
+				WHEN 'remoteok_feed' THEN 0
+				WHEN 'jobicy_feed' THEN 0
+				WHEN 'remote_rss_feed' THEN 0
+				WHEN 'reddit_feed' THEN 0
+				WHEN 'usajobs_feed' THEN 0
 				WHEN 'greenhouse' THEN 1
 					ELSE 2
 				END,
@@ -78,6 +85,17 @@
 			{},
 			{ datasource: ds() }
 		) />
+	</cffunction>
+
+	<cffunction name="getFeedAtsConfigJson" access="public" returntype="string" output="false">
+		<cfargument name="careersSource" type="string" required="true" />
+		<cfset q = queryExecute(
+			"SELECT ats_config FROM companies WHERE careers_source = ? LIMIT 1",
+			[ { value: trim( arguments.careersSource ), cfsqltype: "cf_sql_varchar" } ],
+			{ datasource: ds() }
+		) />
+		<cfif q.recordCount EQ 0><cfreturn "" /></cfif>
+		<cfreturn toString( q.ats_config[ 1 ] ) />
 	</cffunction>
 
 	<cffunction name="getById" access="public" returntype="struct" output="false">
@@ -112,8 +130,65 @@
 	</cffunction>
 
 	<cffunction name="ensureFeedSources" access="public" returntype="void" output="false">
-		<cfset upsertFeedSource(
-			name = "Remotive Feed",
+	<cfset upsertFeedSource(
+		name = "CF Global Watcher",
+		careersUrl = "https://www.bing.com/search?format=rss",
+		careersSource = "cf_global_watcher",
+		atsConfig = {
+			"max_runs_per_day": 2,
+			"min_interval_minutes": 720,
+			"max_queries_per_run": 20,
+			"max_url_fetches_per_query": 25,
+			"fetch_sleep_ms": 450,
+			"brave_api_key": "",
+			"global_watcher_queries": [
+				"""coldfusion"" developer job",
+				"""cfml"" developer hiring",
+				"""lucee"" developer job",
+				"""coldbox"" developer job posting",
+				"full stack developer coldfusion backend job",
+				"fullstack cfml developer hiring",
+				"coldfusion developer remote",
+				"cfml developer Europe job",
+				"coldfusion developer Australia hiring",
+				"coldfusion developer Canada job",
+				"cfml developer United Kingdom",
+				"coldfusion developer Singapore job",
+				"coldfusion site:boards.greenhouse.io",
+				"cfml site:jobs.lever.co",
+				"coldfusion site:myworkdayjobs.com",
+				"cfml site:jobs.ashbyhq.com",
+				"coldfusion site:boards.greenhouse.io embed job",
+				"coldfusion site:linkedin.com/jobs",
+				"cfml site:indeed.com viewjob",
+				"coldfusion site:glassdoor.com job",
+				"lucee site:stackoverflow.com/jobs",
+				"coldfusion site:smartrecruiters.com",
+				"cfml site:jobvite.com",
+				"coldfusion site:icims.com jobs",
+				"coldfusion developer site:remoteok.com",
+				"cfml site:weworkremotely.com",
+				"coldfusion site:jobicy.com",
+				"coldfusion site:arbeitnow.com",
+				"cfml developer site:remotive.com",
+				"coldfusion site:wellfound.com jobs",
+				"coldfusion site:simplyhired.com",
+				"cfml site:monster.com job",
+				"coldfusion site:careerbuilder.com",
+				"coldfusion developer site:ziprecruiter.com",
+				"cfml developer site:seek.com.au",
+				"coldfusion site:totaljobs.com",
+				"cfml developer site:stepstone.de",
+				"coldfusion developer site:naukri.com",
+				"cfml developer site:foundit.in",
+				"coldfusion site:instahyre.com",
+				"mura cms developer job hiring",
+				"adobe coldfusion developer job worldwide"
+			]
+		}
+	) />
+	<cfset upsertFeedSource(
+		name = "Remotive Feed",
 			careersUrl = "https://remotive.com/api/remote-jobs",
 			careersSource = "remotive_feed",
 			atsConfig = {}
@@ -134,7 +209,7 @@
 			name = "Adzuna Feed",
 			careersUrl = "https://api.adzuna.com/v1/api/jobs/in/search/1",
 			careersSource = "adzuna_feed",
-			atsConfig = { "country": "in" }
+			atsConfig = { "countries": [ "us", "gb", "ca", "au", "de", "in" ], "country": "in" }
 		) />
 		<cfset upsertFeedSource(
 			name = "Google Programmable Search (CFML)",
@@ -158,7 +233,23 @@
 				"coldfusion developer jobs India site:indeed.co.in",
 				"CFML developer India site:instahyre.com",
 				"coldfusion developer India site:trabajo.org",
-				"coldfusion developer Accenture India hiring"
+				"coldfusion developer Accenture India hiring",
+				"(coldfusion OR cfml OR lucee) site:remoteok.com",
+				"(coldfusion OR cfml) site:weworkremotely.com",
+				"coldfusion developer site:remote.co",
+				"cfml developer site:jobspresso.co",
+				"coldfusion remote site:workingnomads.com",
+				"full stack coldfusion site:justremote.co",
+				"coldfusion developer site:flexjobs.com",
+				"cfml developer site:wellfound.com",
+				"coldfusion developer site:upwork.com",
+				"coldfusion developer site:simplyhired.com",
+				"coldfusion developer site:toptal.com",
+				"coldfusion developer site:jobicy.com",
+				"ZOLL emsCharts coldfusion developer",
+				"site:emscharts.com coldfusion",
+				"companies using coldfusion .cfm worldwide",
+				"builtwith coldfusion companies USA"
 			]
 		}
 		) />
@@ -236,10 +327,13 @@
 		}
 	) />
 	<cfset upsertFeedSource(
-		name = "Jooble (CFML India)",
+		name = "Jooble (CFML Global)",
 		careersUrl = "https://jooble.org/api/",
 		careersSource = "jooble_feed",
-		atsConfig = { "keywords": [ "ColdFusion", "CFML", "Lucee", "full stack coldfusion" ], "location": "India" }
+		atsConfig = {
+			"keywords": [ "ColdFusion", "CFML", "Lucee", "full stack coldfusion" ],
+			"locations": [ "Remote", "United States", "United Kingdom", "Canada", "Australia", "Germany", "India" ]
+		}
 	) />
 	<cfset upsertFeedSource(
 		name = "Expertini India (CFML)",
@@ -281,6 +375,80 @@
 			]
 		}
 	) />
+	<cfset upsertFeedSource(
+		name = "Remote OK",
+		careersUrl = "https://remoteok.com/api",
+		careersSource = "remoteok_feed",
+		atsConfig = { "api_url": "https://remoteok.com/api" }
+	) />
+	<cfset upsertFeedSource(
+		name = "Jobicy Remote Jobs",
+		careersUrl = "https://jobicy.com/api/v2/remote-jobs",
+		careersSource = "jobicy_feed",
+		atsConfig = { "count": 50 }
+	) />
+	<cfset upsertFeedSource(
+		name = "We Work Remotely (RSS)",
+		careersUrl = "https://weworkremotely.com/remote-jobs.rss",
+		careersSource = "remote_rss_feed",
+		atsConfig = {
+			"raw_source": "weworkremotely",
+			"rss_urls": [
+				"https://weworkremotely.com/remote-jobs.rss",
+				"https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+				"https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss"
+			]
+		}
+	) />
+	<cfset upsertFeedSource(
+		name = "Reddit (CF hiring)",
+		careersUrl = "https://www.reddit.com/r/coldfusion/new.json",
+		careersSource = "reddit_feed",
+		atsConfig = {
+			"max_posts_per_listing": 100,
+			"request_sleep_ms": 2500,
+			"user_agent": "web:coldfusion-job-finder:v1.0 (job aggregator)",
+			"listing_urls": [
+				"https://www.reddit.com/r/coldfusion/new.json?limit=100",
+				"https://www.reddit.com/r/forhire/search.json?q=coldfusion+OR+cfml+OR+lucee&restrict_sr=1&sort=new&limit=100",
+				"https://www.reddit.com/r/jobbit/search.json?q=coldfusion+OR+cfml&restrict_sr=1&sort=new&limit=100",
+				"https://www.reddit.com/r/remotejs/search.json?q=coldfusion+OR+cfml&restrict_sr=1&sort=new&limit=50",
+				"https://www.reddit.com/search.json?q=coldfusion+hiring+OR+%22coldfusion+developer%22&sort=new&limit=100"
+			]
+		}
+	) />
+	<cfset upsertFeedSource(
+		name = "USAJOBS.gov (CF)",
+		careersUrl = "https://data.usajobs.gov/api/search",
+		careersSource = "usajobs_feed",
+		atsConfig = {
+			"api_key": "",
+			"user_agent": "",
+			"results_per_page": 50,
+			"keywords": [ "ColdFusion", "CFML", "Lucee" ]
+		}
+	) />
+	</cffunction>
+
+	<!--- Removes the "Unknown Company" external_feed placeholder when no jobs reference it. Returns count removed. --->
+	<cffunction name="purgeEmptyUnknownCompany" access="public" returntype="numeric" output="false">
+		<cfset q = queryExecute(
+			"SELECT c.id FROM companies c
+			 WHERE c.name = 'Unknown Company' AND c.careers_source = 'external_feed'
+			   AND NOT EXISTS ( SELECT 1 FROM jobs j WHERE j.company_id = c.id )",
+			{},
+			{ datasource: ds() }
+		) />
+		<cfset removed = 0 />
+		<cfloop query="q">
+			<cfset queryExecute(
+				"DELETE FROM companies WHERE id = ?",
+				[ { value: val( q.id ), cfsqltype: "cf_sql_integer" } ],
+				{ datasource: ds() }
+			) />
+			<cfset removed = removed + 1 />
+		</cfloop>
+		<cfreturn removed />
 	</cffunction>
 
 	<cffunction name="getOrCreateExternalCompany" access="public" returntype="numeric" output="false">

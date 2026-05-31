@@ -22,8 +22,13 @@
 	<cfelse>
 		<cfset locationKeyword = "" />
 	</cfif>
+	<cfif structKeyExists( url, "source" )>
+		<cfset rawSource = trim( url.source ) />
+	<cfelse>
+		<cfset rawSource = "" />
+	</cfif>
 
-	<cfset data = application.jobService.list( companyId, keyword, minScore, locationKeyword ) />
+	<cfset data = application.jobService.list( companyId, keyword, minScore, locationKeyword, rawSource ) />
 	<cfset responseBody = {
 		"ok": true,
 		"data": data,

@@ -19,6 +19,7 @@
 		<cfargument name="keyword" type="string" required="false" default="" />
 		<cfargument name="minScore" type="numeric" required="false" default="0" />
 		<cfargument name="locationKeyword" type="string" required="false" default="" />
+		<cfargument name="rawSource" type="string" required="false" default="" />
 		<cfset pageData = listPaged(
 			companyId = arguments.companyId,
 			keyword = arguments.keyword,
@@ -27,7 +28,8 @@
 			pageSize = 5000,
 			sortBy = "fetched_at",
 			sortDir = "desc",
-			locationKeyword = arguments.locationKeyword
+			locationKeyword = arguments.locationKeyword,
+			rawSource = arguments.rawSource
 		) />
 		<cfreturn pageData.rows />
 	</cffunction>
@@ -41,6 +43,7 @@
 		<cfargument name="sortBy" type="string" required="false" default="fetched_at" />
 		<cfargument name="sortDir" type="string" required="false" default="desc" />
 		<cfargument name="locationKeyword" type="string" required="false" default="" />
+		<cfargument name="rawSource" type="string" required="false" default="" />
 
 		<cfif arguments.page LT 1><cfset arguments.page = 1 /></cfif>
 		<cfif arguments.pageSize LT 1><cfset arguments.pageSize = 25 /></cfif>
@@ -82,6 +85,10 @@
 			<cfset locationLike = "%" & arguments.locationKeyword & "%" />
 			<cfset fromSql = fromSql & " AND lower(j.location) LIKE lower(?)" />
 			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
+		</cfif>
+		<cfif len( trim( arguments.rawSource ) )>
+			<cfset fromSql = fromSql & " AND j.raw_source = ?" />
+			<cfset arrayAppend( params, { value: trim( arguments.rawSource ), cfsqltype: "cf_sql_varchar" } ) />
 		</cfif>
 
 		<cfset countQ = queryExecute( "SELECT COUNT(*) AS cnt" & fromSql, params, { datasource: ds() } ) />
@@ -150,6 +157,62 @@
 			],
 			{ datasource: ds() }
 		) />
+	</cffunction>
+
+	<!--- Jobs assigned to a placeholder "Unknown Company" external_feed row (for company-name backfill). --->
+	<cffunction name="getUnknownCompanyJobs" access="public" returntype="query" output="false">
+		<cfreturn queryExecute(
+			"SELECT j.id, j.link, j.title, j.external_id, j.raw_source
+			 FROM jobs j
+			 INNER JOIN companies c ON c.id = j.company_id
+			 WHERE c.name = 'Unknown Company' AND c.careers_source = 'external_feed'
+			 ORDER BY j.id",
+			{},
+			{ datasource: ds() }
+		) />
+	</cffunction>
+
+	<!--- True when another job (not excludeJobId) already holds this externalId under companyId (a deduped twin). --->
+	<cffunction name="duplicateJobExists" access="public" returntype="boolean" output="false">
+		<cfargument name="companyId" type="numeric" required="true" />
+		<cfargument name="externalId" type="string" required="true" />
+		<cfargument name="excludeJobId" type="numeric" required="false" default="0" />
+		<cfset q = queryExecute(
+			"SELECT id FROM jobs WHERE company_id = ? AND external_id = ? AND id <> ? LIMIT 1",
+			[
+				{ value: arguments.companyId, cfsqltype: "cf_sql_integer" },
+				{ value: arguments.externalId, cfsqltype: "cf_sql_varchar" },
+				{ value: arguments.excludeJobId, cfsqltype: "cf_sql_integer" }
+			],
+			{ datasource: ds() }
+		) />
+		<cfreturn q.recordCount GT 0 />
+	</cffunction>
+
+	<cffunction name="reassignJobCompany" access="public" returntype="void" output="false">
+		<cfargument name="jobId" type="numeric" required="true" />
+		<cfargument name="companyId" type="numeric" required="true" />
+		<cfargument name="title" type="string" required="false" default="" />
+		<cfif len( trim( arguments.title ) )>
+			<cfset queryExecute(
+				"UPDATE jobs SET company_id = ?, title = ? WHERE id = ?",
+				[
+					{ value: arguments.companyId, cfsqltype: "cf_sql_integer" },
+					{ value: trim( arguments.title ), cfsqltype: "cf_sql_varchar" },
+					{ value: arguments.jobId, cfsqltype: "cf_sql_integer" }
+				],
+				{ datasource: ds() }
+			) />
+		<cfelse>
+			<cfset queryExecute(
+				"UPDATE jobs SET company_id = ? WHERE id = ?",
+				[
+					{ value: arguments.companyId, cfsqltype: "cf_sql_integer" },
+					{ value: arguments.jobId, cfsqltype: "cf_sql_integer" }
+				],
+				{ datasource: ds() }
+			) />
+		</cfif>
 	</cffunction>
 
 	<cffunction name="deleteJobById" access="public" returntype="void" output="false">
