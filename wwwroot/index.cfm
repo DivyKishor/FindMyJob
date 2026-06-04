@@ -52,6 +52,8 @@
 	<cfset runInfo = application.runStatusService.getLatestRun() />
 	<cfset totalCompanies = arrayLen( companies ) />
 	<cfset totalJobs = jobsData.totalRows />
+	<cfset totalJobsInDb = application.jobService.countAll() />
+	<cfset filtersActive = len( keyword ) OR len( locationKeyword ) OR minScore GT 0 OR len( rawSourceFilter ) OR companyId GT 0 />
 	<cfset totalAlerts = alertsData.totalRows />
 	<cfcatch type="any">
 		<cfset companies = [] />
@@ -59,6 +61,8 @@
 		<cfset alertsData = { rows: [], totalRows: 0, page: 1, pageSize: 25, totalPages: 1, sortBy: "sent_at", sortDir: "desc" } />
 		<cfset totalCompanies = 0 />
 		<cfset totalJobs = 0 />
+		<cfset totalJobsInDb = 0 />
+		<cfset filtersActive = false />
 		<cfset totalAlerts = 0 />
 		<cfset pageError = cfcatch.message />
 	</cfcatch>
@@ -162,7 +166,7 @@
 
 		<div class="row g-3 mb-4">
 			<div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-secondary small">Companies</div><div class="fs-4 fw-semibold">#totalCompanies#</div></div></div></div>
-			<div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-secondary small">Jobs (CF-related filter)</div><div class="fs-4 fw-semibold">#totalJobs#</div></div></div></div>
+			<div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-secondary small">Jobs matching filters</div><div class="fs-4 fw-semibold">#totalJobs#</div><cfif filtersActive OR totalJobs NEQ totalJobsInDb><div class="small text-secondary">#totalJobsInDb# total in database</div></cfif></div></div></div>
 			<div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-secondary small">Alerts</div><div class="fs-4 fw-semibold">#totalAlerts#</div></div></div></div>
 		</div>
 
@@ -213,8 +217,17 @@
 					<a href="#indexUrl#?#baseFilterNoLocation#&location=#urlEncodedFormat( "remote" )#&jobs_page=1">Remote</a> |
 					<a href="#indexUrl#?#baseFilterNoKeyword#&keyword=#urlEncodedFormat( "full stack" )#&jobs_page=1">Full Stack</a> |
 					<a href="#indexUrl#?keyword=&location=&min_score=0&source=#urlEncodedFormat( "cf_global_watcher" )#&company_id=0&jobs_page=1&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#" class="btn btn-sm btn-outline-primary">Global CF (any location)</a> |
-					<a href="#indexUrl#?#baseFilterNoLocation#&location=&min_score=0&source=&jobs_page=1">Clear all</a>
+					<a href="#indexUrl#?keyword=&location=&min_score=0&source=&company_id=0&jobs_page=1&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#" class="btn btn-sm btn-outline-secondary">Clear all</a>
 				</div>
+				<cfif totalJobs EQ 0 AND totalJobsInDb GT 0>
+					<div class="alert alert-warning small mt-3 mb-0">
+						<strong>#totalJobsInDb# job(s)</strong> are in the database, but none match the current filters
+						<cfif len( keyword )> (keyword <em>#encodeForHTML( keyword )#</em> also matches CFML/Lucee)</cfif>
+						<cfif len( locationKeyword )> (location searches title, description, and location fields)</cfif>.
+						<a href="#indexUrl#?keyword=&location=&min_score=0&source=&company_id=0&jobs_page=1&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#">Clear filters</a>
+						or try <a href="#indexUrl#?#baseFilterNoLocation#&min_score=70&location=&jobs_page=1">India-eligible (70+)</a>.
+					</div>
+				</cfif>
 			</div>
 		</div>
 

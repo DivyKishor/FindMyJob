@@ -73,11 +73,11 @@
 			 SET cf_likelihood_score = COALESCE((
 			   SELECT MAX(js.score)
 			   FROM jobs j
-			   INNER JOIN job_scores js ON js.job_id = j.id
+			   INNER JOIN job_scores js ON js.job_id = j.id AND js.rule_version = ?
 			   WHERE j.company_id = companies.id
 			 ), 0),
 			     updated_at = datetime('now')",
-			{},
+			[ { value: variables.scoringService.getRuleVersion(), cfsqltype: "cf_sql_varchar" } ],
 			{ datasource: ds() }
 		) />
 	</cffunction>

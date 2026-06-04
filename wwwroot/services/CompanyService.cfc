@@ -73,6 +73,7 @@
 				WHEN 'expertini_scan' THEN 0
 				WHEN 'indeed_scan' THEN 0
 				WHEN 'instahyre_scan' THEN 0
+				WHEN 'devjobsscanner_scan' THEN 0
 				WHEN 'remoteok_feed' THEN 0
 				WHEN 'jobicy_feed' THEN 0
 				WHEN 'remote_rss_feed' THEN 0
@@ -376,6 +377,21 @@
 		}
 	) />
 	<cfset upsertFeedSource(
+		name = "DevJobsScanner (ColdFusion)",
+		careersUrl = "https://www.devjobsscanner.com/coldfusion-jobs/",
+		careersSource = "devjobsscanner_scan",
+		atsConfig = {
+			"max_job_details": 80,
+			"promote_companies": false,
+			"max_promote_per_run": 8,
+			"listing_urls": [
+				"https://www.devjobsscanner.com/coldfusion-jobs/",
+				"https://www.devjobsscanner.com/cfml-jobs/",
+				"https://www.devjobsscanner.com/lucee-jobs/"
+			]
+		}
+	) />
+	<cfset upsertFeedSource(
 		name = "Remote OK",
 		careersUrl = "https://remoteok.com/api",
 		careersSource = "remoteok_feed",
@@ -428,6 +444,91 @@
 			"keywords": [ "ColdFusion", "CFML", "Lucee" ]
 		}
 	) />
+	</cffunction>
+
+	<!--- Distinct external_feed employer names that have jobs from a given raw_source and are not yet
+	      registered as career_page_scan targets. Used to backfill discovered employers. --->
+	<cffunction name="listUnpromotedExternalEmployers" access="public" returntype="query" output="false">
+		<cfargument name="rawSource" type="string" required="true" />
+		<cfreturn queryExecute(
+			"SELECT DISTINCT c.name
+			 FROM companies c
+			 INNER JOIN jobs j ON j.company_id = c.id
+			 WHERE c.careers_source = 'external_feed'
+			   AND j.raw_source = ?
+			   AND c.name <> 'Unknown Company'
+			   AND c.name <> 'DevJobsScanner employer'
+			   AND NOT EXISTS (
+			     SELECT 1 FROM companies c2
+			     WHERE c2.careers_source = 'career_page_scan' AND c2.name = c.name
+			   )
+			 ORDER BY c.name",
+			[ { value: trim( arguments.rawSource ), cfsqltype: "cf_sql_varchar" } ],
+			{ datasource: ds() }
+		) />
+	</cffunction>
+
+	<!--- Real employer rows missing a website or careers_url, oldest-checked first (so runs rotate). --->
+	<cffunction name="listCompaniesMissingLinks" access="public" returntype="query" output="false">
+		<cfargument name="maxRows" type="numeric" required="false" default="15" />
+		<cfset lim = arguments.maxRows GT 0 ? arguments.maxRows : 15 />
+		<cfreturn queryExecute(
+			"SELECT id, name, website, careers_url, careers_source
+			 FROM companies
+			 WHERE careers_source IN ('career_page_scan', 'external_feed', 'greenhouse')
+			   AND name <> 'Unknown Company'
+			   AND name <> 'DevJobsScanner employer'
+			   AND (
+			     website IS NULL OR trim(website) = ''
+			     OR careers_url IS NULL OR trim(careers_url) = ''
+			   )
+			 ORDER BY updated_at ASC, id ASC
+			 LIMIT #int( lim )#",
+			{},
+			{ datasource: ds() }
+		) />
+	</cffunction>
+
+	<!--- Fill only the blank website / careers_url fields for a company. Returns true if a row changed. --->
+	<cffunction name="fillCompanyLinks" access="public" returntype="boolean" output="false">
+		<cfargument name="companyId" type="numeric" required="true" />
+		<cfargument name="website" type="string" required="false" default="" />
+		<cfargument name="careersUrl" type="string" required="false" default="" />
+		<cfset w = trim( arguments.website ) />
+		<cfset c = trim( arguments.careersUrl ) />
+		<cfif NOT len( w ) AND NOT len( c )><cfreturn false /></cfif>
+		<cfset r = queryExecute(
+			"UPDATE companies
+			 SET website = CASE WHEN (website IS NULL OR trim(website) = '') AND ? <> '' THEN ? ELSE website END,
+			     careers_url = CASE WHEN (careers_url IS NULL OR trim(careers_url) = '') AND ? <> '' THEN ? ELSE careers_url END,
+			     updated_at = datetime('now')
+			 WHERE id = ?
+			   AND (
+			     ( (website IS NULL OR trim(website) = '') AND ? <> '' )
+			     OR ( (careers_url IS NULL OR trim(careers_url) = '') AND ? <> '' )
+			   )",
+			[
+				{ value: w, cfsqltype: "cf_sql_varchar" },
+				{ value: w, cfsqltype: "cf_sql_varchar" },
+				{ value: c, cfsqltype: "cf_sql_varchar" },
+				{ value: c, cfsqltype: "cf_sql_varchar" },
+				{ value: val( arguments.companyId ), cfsqltype: "cf_sql_integer" },
+				{ value: w, cfsqltype: "cf_sql_varchar" },
+				{ value: c, cfsqltype: "cf_sql_varchar" }
+			],
+			{ datasource: ds(), result: "updResult" }
+		) />
+		<cfreturn structKeyExists( updResult, "recordCount" ) AND val( updResult.recordCount ) GT 0 />
+	</cffunction>
+
+	<!--- Bump updated_at so an unresolved company rotates to the back of the enrichment queue. --->
+	<cffunction name="markCompanyChecked" access="public" returntype="void" output="false">
+		<cfargument name="companyId" type="numeric" required="true" />
+		<cfset queryExecute(
+			"UPDATE companies SET updated_at = datetime('now') WHERE id = ?",
+			[ { value: val( arguments.companyId ), cfsqltype: "cf_sql_integer" } ],
+			{ datasource: ds() }
+		) />
 	</cffunction>
 
 	<!--- Removes the "Unknown Company" external_feed placeholder when no jobs reference it. Returns count removed. --->

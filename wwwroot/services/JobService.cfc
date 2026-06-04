@@ -14,6 +14,20 @@
 		<cfreturn variables.databaseService.getDatasource() />
 	</cffunction>
 
+	<!--- When the user searches "coldfusion" or "cf", match all CF stack terms we ingest/score. --->
+	<cffunction name="expandCfKeywordTerms" access="private" returntype="array" output="false">
+		<cfargument name="keyword" type="string" required="true" />
+		<cfset kw = lCase( trim( arguments.keyword ) ) />
+		<cfset umbrella = [ "coldfusion", "cfml", "lucee", "mura", "cold fusion", "cfscript", "adobe cf", "cf developer" ] />
+		<cfif kw EQ "coldfusion" OR kw EQ "cf" OR kw EQ "cfml" OR kw EQ "lucee"><cfreturn umbrella /></cfif>
+		<cfreturn [ trim( arguments.keyword ) ] />
+	</cffunction>
+
+	<cffunction name="countAll" access="public" returntype="numeric" output="false">
+		<cfset q = queryExecute( "SELECT COUNT(*) AS cnt FROM jobs", {}, { datasource: ds() } ) />
+		<cfreturn val( q[ listFirst( q.columnList ) ][ 1 ] ) />
+	</cffunction>
+
 	<cffunction name="list" access="public" returntype="array" output="false">
 		<cfargument name="companyId" type="numeric" required="false" default="0" />
 		<cfargument name="keyword" type="string" required="false" default="" />
@@ -54,7 +68,7 @@
 			"title": "j.title",
 			"location": "j.location",
 			"company_name": "c.name",
-			"score": "c.cf_likelihood_score"
+			"score": "COALESCE(js.score, 0)"
 		} />
 		<cfset safeSortBy = lCase( arguments.sortBy ) />
 		<cfif NOT structKeyExists( sortMap, safeSortBy )>
@@ -72,10 +86,16 @@
 			<cfset arrayAppend( params, { value: arguments.companyId, cfsqltype: "cf_sql_integer" } ) />
 		</cfif>
 		<cfif len( trim( arguments.keyword ) )>
-			<cfset likeValue = "%" & arguments.keyword & "%" />
-			<cfset fromSql = fromSql & " AND (j.title LIKE ? OR j.description LIKE ?)" />
-			<cfset arrayAppend( params, { value: likeValue, cfsqltype: "cf_sql_varchar" } ) />
-			<cfset arrayAppend( params, { value: likeValue, cfsqltype: "cf_sql_longvarchar" } ) />
+			<cfset kwTerms = expandCfKeywordTerms( arguments.keyword ) />
+			<cfset fromSql = fromSql & " AND (" />
+			<cfloop from="1" to="#arrayLen( kwTerms )#" index="kwIdx">
+				<cfif kwIdx GT 1><cfset fromSql = fromSql & " OR " /></cfif>
+				<cfset likeValue = "%" & kwTerms[ kwIdx ] & "%" />
+				<cfset fromSql = fromSql & "(lower(j.title) LIKE lower(?) OR lower(j.description) LIKE lower(?))" />
+				<cfset arrayAppend( params, { value: likeValue, cfsqltype: "cf_sql_varchar" } ) />
+				<cfset arrayAppend( params, { value: likeValue, cfsqltype: "cf_sql_longvarchar" } ) />
+			</cfloop>
+			<cfset fromSql = fromSql & ")" />
 		</cfif>
 		<cfif arguments.minScore GT 0>
 			<cfset fromSql = fromSql & " AND COALESCE(js.score, 0) >= ?" />
@@ -83,8 +103,11 @@
 		</cfif>
 		<cfif len( trim( arguments.locationKeyword ) )>
 			<cfset locationLike = "%" & arguments.locationKeyword & "%" />
-			<cfset fromSql = fromSql & " AND lower(j.location) LIKE lower(?)" />
+			<!--- India/remote often appear in title or description, not only the location column --->
+			<cfset fromSql = fromSql & " AND (lower(j.location) LIKE lower(?) OR lower(j.title) LIKE lower(?) OR lower(j.description) LIKE lower(?))" />
 			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
+			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
+			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_longvarchar" } ) />
 		</cfif>
 		<cfif len( trim( arguments.rawSource ) )>
 			<cfset fromSql = fromSql & " AND j.raw_source = ?" />

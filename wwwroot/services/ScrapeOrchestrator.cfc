@@ -26,7 +26,7 @@
 	</cffunction>
 
 	<cffunction name="runAll" access="public" returntype="struct" output="false">
-		<cfset summary = { companiesProcessed: 0, jobsUpserted: 0, errors: [], quotaGuardSkips: 0, scanBudgetSkips: 0, sourceHealth: {}, errorClasses: {} } />
+		<cfset summary = { companiesProcessed: 0, jobsUpserted: 0, errors: [], quotaGuardSkips: 0, scanBudgetSkips: 0, sourceHealth: {}, errorClasses: {}, companyLinksEnriched: 0 } />
 		<!--- Many seeded employers use career_page_scan; cap only guards runaway time (each scan may fetch sub-pages) --->
 		<cfset maxCareerScanPerRun = 120 />
 		<cfset careerScanProcessed = 0 />
@@ -36,7 +36,7 @@
 			<cfset companyName = companiesQ.name[ i ] />
 			<cfif structKeyExists( companiesQ, "careers_source" )><cfset source = lCase( trim( companiesQ.careers_source[ i ] ) ) /><cfelse><cfset source = "" /></cfif>
 			<cfset cfg = parseConfig( companiesQ.ats_config[ i ] ) />
-			<cfif listFindNoCase( "greenhouse,remotive_feed,arbeitnow_feed,adzuna_feed,getcfmljobs_feed,google_cse_feed,cutshort_scan,linkedin_public,foundit_scan,shine_scan,weekday_scan,jooble_feed,expertini_scan,indeed_scan,instahyre_scan,remoteok_feed,jobicy_feed,remote_rss_feed,reddit_feed,usajobs_feed,career_page_scan", source ) EQ 0>
+			<cfif listFindNoCase( "greenhouse,remotive_feed,arbeitnow_feed,adzuna_feed,getcfmljobs_feed,google_cse_feed,cutshort_scan,linkedin_public,foundit_scan,shine_scan,weekday_scan,jooble_feed,expertini_scan,indeed_scan,instahyre_scan,devjobsscanner_scan,remoteok_feed,jobicy_feed,remote_rss_feed,reddit_feed,usajobs_feed,career_page_scan", source ) EQ 0>
 				<cfset arrayAppend( summary.errors, "Skipped (unsupported source '#source#') for company #companyId# (#companyName#)" ) />
 				<cfset variables.loggerService.warn( "Skipped unsupported careers_source=#source# for company #companyId# (#companyName#)" ) />
 				<cfset incrementSourceHealth( summary.sourceHealth, source, "skipped", 0 ) />
@@ -95,6 +95,8 @@
 				<cfset n = ingestIndeedScan( companiesQ.ats_config[ i ] ) />
 			<cfelseif source EQ "instahyre_scan">
 				<cfset n = ingestInstahyreScan( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "devjobsscanner_scan">
+				<cfset n = ingestDevJobsScannerScan( companiesQ.ats_config[ i ] ) />
 			<cfelseif source EQ "remoteok_feed">
 				<cfset n = ingestRemoteOk( companiesQ.ats_config[ i ] ) />
 			<cfelseif source EQ "jobicy_feed">
@@ -123,6 +125,24 @@
 			</cftry>
 			<cfset sleepMs( 350 ) />
 		</cfloop>
+
+		<!--- Daily enrichment: resolve missing website / careers links for companies in the table. --->
+		<cfset enrichKey = "enrich_company_links" />
+		<cfset enrichQuota = variables.sourceQuotaService.canRun( enrichKey, 1, 720 ) />
+		<cfif enrichQuota.allowed>
+			<cftry>
+				<cfset enrichResult = enrichCompanyLinks( 15, "" ) />
+				<cfset summary.companyLinksEnriched = enrichResult.enriched />
+				<cfset variables.sourceQuotaService.markRun( enrichKey ) />
+				<cfcatch type="any">
+					<cfset arrayAppend( summary.errors, "Company link enrichment: #cfcatch.message#" ) />
+					<cfset variables.loggerService.error( "Company link enrichment failed: #cfcatch.message#", cfcatch ) />
+				</cfcatch>
+			</cftry>
+		<cfelse>
+			<cfset variables.loggerService.info( "Company link enrich skipped (quota): #enrichQuota.reason#" ) />
+		</cfif>
+
 		<cfset variables.loggerService.info( "Scrape finished: companies=#summary.companiesProcessed# jobsUpserted=#summary.jobsUpserted#" ) />
 		<cfset variables.loggerService.info( "Source health: #serializeJSON( summary.sourceHealth )#" ) />
 		<cfset variables.loggerService.info( "Error classes: #serializeJSON( summary.errorClasses )#" ) />
@@ -2194,6 +2214,326 @@
 		<cfreturn n />
 	</cffunction>
 
+	<!--- DevJobsScanner aggregator scan (devjobsscanner.com).
+	      Each job card links straight to the source (LinkedIn / Dice / devitjobs.*); there is no internal detail page,
+	      so we read title + apply URL (+ company / location when present) directly from the listing HTML.
+	      The CF signal lives in the title, which is enough for shouldPersistJob(). --->
+	<cffunction name="ingestDevJobsScannerScan" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfset maxDetails = getNumericCfg( cfg, "max_job_details", 80 ) />
+		<cfif structKeyExists( cfg, "listing_urls" ) AND isArray( cfg.listing_urls ) AND arrayLen( cfg.listing_urls ) GT 0>
+			<cfset listingUrls = cfg.listing_urls />
+		<cfelse>
+			<cfset listingUrls = [ "https://www.devjobsscanner.com/coldfusion-jobs/" ] />
+		</cfif>
+		<!--- Opt-in: resolve newly seen employers to their own careers page and register as career_page_scan targets. --->
+		<cfset promoteCompanies = structKeyExists( cfg, "promote_companies" ) AND isBoolean( cfg.promote_companies ) AND cfg.promote_companies />
+		<cfset maxPromote = getNumericCfg( cfg, "max_promote_per_run", 8 ) />
+		<cfset braveApiKey = structKeyExists( cfg, "brave_api_key" ) ? trim( toString( cfg.brave_api_key ) ) : "" />
+		<cfset employerNames = {} />
+		<cfset cardPattern = '(?si)<a\s+href="([^"]+)"[^>]*class="jbs-text-hover-link flex self-start"[^>]*>\s*<h2[^>]*>(.*?)</h2>\s*</a>' />
+		<cfset n = 0 />
+		<cfset processed = 0 />
+		<cfset seen = {} />
+		<cfloop array="#listingUrls#" index="lu">
+			<cfif processed GTE maxDetails><cfbreak /></cfif>
+			<cfset listU = trim( toString( lu ) ) />
+			<cfif NOT len( listU )><cfcontinue /></cfif>
+			<cftry>
+				<cfset htmlList = variables.httpClientService.getText( listU, 30 ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "DevJobsScanner listing fetch failed url=#listU#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cfset pos = 1 />
+			<cfloop condition="true">
+				<cfif processed GTE maxDetails><cfbreak /></cfif>
+				<cfset m = reFindNoCase( cardPattern, htmlList, pos, true ) />
+				<cfif NOT isArray( m.pos ) OR arrayLen( m.pos ) LT 3 OR m.pos[ 1 ] EQ 0><cfbreak /></cfif>
+				<cfset applyUrl = decodeHtmlEntities( mid( htmlList, m.pos[ 2 ], m.len[ 2 ] ) ) />
+				<cfset title = cleanListingText( mid( htmlList, m.pos[ 3 ], m.len[ 3 ] ) ) />
+				<cfset cardEnd = m.pos[ 1 ] + m.len[ 1 ] />
+				<cfset pos = cardEnd />
+				<cfif NOT len( trim( applyUrl ) ) OR NOT len( trim( title ) )><cfcontinue /></cfif>
+
+				<!--- company + location live just after the title anchor in the same card --->
+				<cfset windowStr = mid( htmlList, cardEnd, 800 ) />
+				<cfset companyName = "" />
+				<cfset cm = reFindNoCase( 'href="/company/[^"]*"[^>]*>(.*?)</a>', windowStr, 1, true ) />
+				<cfif isArray( cm.pos ) AND arrayLen( cm.pos ) GTE 2 AND cm.pos[ 2 ] GT 0>
+					<cfset companyName = cleanListingText( mid( windowStr, cm.pos[ 2 ], cm.len[ 2 ] ) ) />
+				</cfif>
+				<cfset locText = "" />
+				<cfset lm = reFindNoCase( 'locationText=([^"&]+)', windowStr, 1, true ) />
+				<cfif isArray( lm.pos ) AND arrayLen( lm.pos ) GTE 2 AND lm.pos[ 2 ] GT 0>
+					<cftry>
+						<cfset locText = trim( urlDecode( mid( windowStr, lm.pos[ 2 ], lm.len[ 2 ] ) ) ) />
+						<cfcatch type="any"><cfset locText = "" /></cfcatch>
+					</cftry>
+				</cfif>
+
+				<!--- stable id from the URL path (drop tracking query) so re-runs dedupe --->
+				<cfset urlNoQuery = lCase( reReplace( trim( applyUrl ), "\?.*$", "" ) ) />
+				<cfset externalId = "devjobsscanner-" & hash( urlNoQuery ) />
+				<cfif structKeyExists( seen, externalId )><cfcontinue /></cfif>
+				<cfset seen[ externalId ] = true />
+
+				<cfset descParts = [ title ] />
+				<cfif len( trim( companyName ) )><cfset arrayAppend( descParts, "Company: " & trim( companyName ) ) /></cfif>
+				<cfif len( trim( locText ) )><cfset arrayAppend( descParts, "Location: " & trim( locText ) ) /></cfif>
+				<cfset arrayAppend( descParts, "Aggregated via DevJobsScanner. Apply: " & trim( applyUrl ) ) />
+				<cfset description = arrayToList( descParts, " | " ) />
+
+				<cfif NOT variables.scoringService.shouldPersistJob( title, description )>
+					<cfset processed = processed + 1 />
+					<cfcontinue />
+				</cfif>
+
+				<cfset finalCompany = len( trim( companyName ) ) ? trim( companyName ) : "DevJobsScanner employer" />
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( finalCompany, "" ) />
+				<cfset variables.jobService.upsertJob( companyId = companyId, externalId = externalId, title = title, description = description, location = locText, link = applyUrl, rawSource = "devjobsscanner" ) />
+				<cfif len( trim( companyName ) )><cfset employerNames[ trim( companyName ) ] = true /></cfif>
+				<cfset n = n + 1 />
+				<cfset processed = processed + 1 />
+			</cfloop>
+			<cfset sleepMs( 500 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "DevJobsScanner ingest: upserted #n# job(s)." ) /></cfif>
+
+		<!--- Promote distinct employers to career_page_scan so their own site is scanned for richer detail. --->
+		<cfif promoteCompanies AND maxPromote GT 0>
+			<cfset promotedNames = [] />
+			<cfset attempted = 0 />
+			<cfloop collection="#employerNames#" item="empName">
+				<cfif attempted GTE maxPromote><cfbreak /></cfif>
+				<cfset attempted = attempted + 1 />
+				<cftry>
+					<cfif promoteEmployerToCareerScan( empName, braveApiKey )>
+						<cfset arrayAppend( promotedNames, empName ) />
+					</cfif>
+					<cfcatch type="any">
+						<cfset variables.loggerService.warn( "DevJobsScanner promote failed for '#empName#': #cfcatch.message#" ) />
+					</cfcatch>
+				</cftry>
+				<cfset sleepMs( 400 ) />
+			</cfloop>
+			<cfif arrayLen( promotedNames ) GT 0>
+				<cfset variables.loggerService.info( "DevJobsScanner promote: registered #arrayLen( promotedNames )# company career page(s): " & arrayToList( promotedNames, "; " ) ) />
+			</cfif>
+		</cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!---
+		One-time backfill: promote employers already captured from past devjobsscanner runs
+		(external_feed companies that have devjobsscanner jobs) to career_page_scan targets.
+		Returns a summary struct. Safe to re-run; companies already promoted are skipped.
+	--->
+	<cffunction name="backfillDevJobsScannerEmployers" access="public" returntype="struct" output="false">
+		<cfargument name="maxPromote" type="numeric" required="false" default="50" />
+		<cfargument name="braveApiKey" type="string" required="false" default="" />
+		<cfset summary = { candidates: 0, attempted: 0, promoted: 0, names: [] } />
+
+		<cfset q = variables.companyService.listUnpromotedExternalEmployers( "devjobsscanner" ) />
+		<cfset summary.candidates = q.recordCount />
+
+		<cfloop query="q">
+			<cfif summary.attempted GTE arguments.maxPromote><cfbreak /></cfif>
+			<cfset empName = trim( q.name ) />
+			<cfif NOT len( empName )><cfcontinue /></cfif>
+			<cfset summary.attempted = summary.attempted + 1 />
+			<cftry>
+				<cfif promoteEmployerToCareerScan( empName, arguments.braveApiKey )>
+					<cfset summary.promoted = summary.promoted + 1 />
+					<cfset arrayAppend( summary.names, empName ) />
+				</cfif>
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "DevJobsScanner backfill failed for '#empName#': #cfcatch.message#" ) />
+				</cfcatch>
+			</cftry>
+			<cfset sleepMs( 400 ) />
+		</cfloop>
+
+		<cfif summary.promoted GT 0>
+			<cfset variables.loggerService.info( "DevJobsScanner backfill: promoted #summary.promoted#/#summary.candidates# employer(s): " & arrayToList( summary.names, "; " ) ) />
+		</cfif>
+		<cfreturn summary />
+	</cffunction>
+
+	<!---
+		Resolve an employer name to its own careers page via web search, then register it as a
+		career_page_scan target. Skips job-board / social / aggregator hosts so we land on the
+		company's real site. Returns true when a company was upserted.
+	--->
+	<cffunction name="promoteEmployerToCareerScan" access="private" returntype="boolean" output="false">
+		<cfargument name="employerName" type="string" required="true" />
+		<cfargument name="braveApiKey" type="string" required="false" default="" />
+		<cfset cleanName = trim( arguments.employerName ) />
+		<cfif NOT len( cleanName ) OR findNoCase( "devjobsscanner employer", cleanName ) GT 0><cfreturn false /></cfif>
+
+		<cfset resolved = resolveEmployerCareerLinks( cleanName, arguments.braveApiKey ) />
+		<cfif NOT resolved.found><cfreturn false /></cfif>
+
+		<cfset variables.companyService.upsertDiscoveredCompany(
+			name = cleanName,
+			website = resolved.website,
+			careersUrl = resolved.careersUrl,
+			discoverySource = "devjobsscanner"
+		) />
+		<cfreturn true />
+	</cffunction>
+
+	<!---
+		Resolve an employer name to its own website + careers page via web search. Skips
+		job-board / social / aggregator hosts so we land on the company's real site.
+		Returns { found:boolean, website:string, careersUrl:string }.
+	--->
+	<cffunction name="resolveEmployerCareerLinks" access="private" returntype="struct" output="false">
+		<cfargument name="employerName" type="string" required="true" />
+		<cfargument name="braveApiKey" type="string" required="false" default="" />
+		<cfset out = { found: false, website: "", careersUrl: "" } />
+		<cfset cleanName = trim( arguments.employerName ) />
+		<cfif NOT len( cleanName )><cfreturn out /></cfif>
+
+		<cfset queryText = """" & cleanName & """ careers" />
+		<cfset hits = [] />
+		<cfset bingFailed = false />
+		<cftry>
+			<cfset hits = fetchBingRssResults( queryText ) />
+			<cfcatch type="any"><cfset bingFailed = true /></cfcatch>
+		</cftry>
+		<cfif len( arguments.braveApiKey ) AND ( bingFailed OR arrayLen( hits ) EQ 0 )>
+			<cftry>
+				<cfset hits = fetchBraveResults( queryText, arguments.braveApiKey ) />
+				<cfcatch type="any"></cfcatch>
+			</cftry>
+		</cfif>
+		<cfif NOT isArray( hits ) OR arrayLen( hits ) EQ 0><cfreturn out /></cfif>
+
+		<cfloop array="#hits#" index="hit">
+			<cfif NOT isStruct( hit ) OR NOT structKeyExists( hit, "url" )><cfcontinue /></cfif>
+			<cfset resolvedUrl = normalizeWatcherUrl( toString( hit.url ) ) />
+			<cfset host = extractHostFromUrl( resolvedUrl ) />
+			<cfif NOT len( host ) OR isJobBoardOrSocialHost( host )><cfcontinue /></cfif>
+
+			<cfset out.website = "https://" & host />
+			<cfset out.careersUrl = out.website & "/careers" />
+			<cfset out.found = true />
+			<cfreturn out />
+		</cfloop>
+		<cfreturn out />
+	</cffunction>
+
+	<!---
+		Daily-run phase: fill in missing website / careers_url for companies already in the table.
+		Resolves each candidate via web search and updates blank fields only. Bounded per run.
+		Returns { candidates, attempted, enriched, names }.
+	--->
+	<cffunction name="enrichCompanyLinks" access="public" returntype="struct" output="false">
+		<cfargument name="maxEnrich" type="numeric" required="false" default="15" />
+		<cfargument name="braveApiKey" type="string" required="false" default="" />
+		<cfset summary = { candidates: 0, attempted: 0, enriched: 0, names: [] } />
+		<cfif arguments.maxEnrich LTE 0><cfreturn summary /></cfif>
+
+		<cfset q = variables.companyService.listCompaniesMissingLinks( arguments.maxEnrich ) />
+		<cfset summary.candidates = q.recordCount />
+
+		<cfloop query="q">
+			<cfif summary.attempted GTE arguments.maxEnrich><cfbreak /></cfif>
+			<cfset cName = trim( q.name ) />
+			<cfif NOT len( cName ) OR cName EQ "Unknown Company" OR cName EQ "DevJobsScanner employer"><cfcontinue /></cfif>
+			<cfset summary.attempted = summary.attempted + 1 />
+			<cftry>
+				<cfset resolved = resolveEmployerCareerLinks( cName, arguments.braveApiKey ) />
+				<cfif resolved.found>
+					<cfset didUpdate = variables.companyService.fillCompanyLinks( val( q.id ), resolved.website, resolved.careersUrl ) />
+					<cfif didUpdate>
+						<cfset summary.enriched = summary.enriched + 1 />
+						<cfset arrayAppend( summary.names, cName ) />
+					<cfelse>
+						<cfset variables.companyService.markCompanyChecked( val( q.id ) ) />
+					</cfif>
+				<cfelse>
+					<!--- bump updated_at so unresolved rows rotate to the back of the queue --->
+					<cfset variables.companyService.markCompanyChecked( val( q.id ) ) />
+				</cfif>
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Company link enrich failed for '#cName#': #cfcatch.message#" ) />
+				</cfcatch>
+			</cftry>
+			<cfset sleepMs( 400 ) />
+		</cfloop>
+
+		<cfif summary.enriched GT 0>
+			<cfset variables.loggerService.info( "Company link enrich: filled #summary.enriched#/#summary.candidates# company link(s): " & arrayToList( summary.names, "; " ) ) />
+		</cfif>
+		<cfreturn summary />
+	</cffunction>
+
+	<!--- Lower-cased registrable host from a URL (drops scheme, path, port, leading www.). --->
+	<cffunction name="extractHostFromUrl" access="private" returntype="string" output="false">
+		<cfargument name="urlText" type="string" required="true" />
+		<cfset u = trim( arguments.urlText ) />
+		<cfif NOT len( u )><cfreturn "" /></cfif>
+		<cfset h = reReplaceNoCase( u, "^[a-z]+://", "", "one" ) />
+		<cfset h = reReplace( h, "[/?##].*$", "", "one" ) />
+		<cfif find( "@", h ) GT 0><cfset h = listLast( h, "@" ) /></cfif>
+		<cfset h = listFirst( h, ":" ) />
+		<cfset h = lCase( trim( h ) ) />
+		<cfif left( h, 4 ) EQ "www."><cfset h = mid( h, 5, len( h ) ) /></cfif>
+		<cfreturn h />
+	</cffunction>
+
+	<!--- True for hosts that are job boards / aggregators / social — not an employer's own site. --->
+	<cffunction name="isJobBoardOrSocialHost" access="private" returntype="boolean" output="false">
+		<cfargument name="host" type="string" required="true" />
+		<cfset h = lCase( trim( arguments.host ) ) />
+		<cfif NOT len( h )><cfreturn true /></cfif>
+		<cfset blocked = "linkedin.com,indeed.com,glassdoor.com,dice.com,ziprecruiter.com,monster.com,simplyhired.com,
+			careerbuilder.com,devjobsscanner.com,devitjobs.com,devitjobs.us,devitjobs.uk,wellfound.com,angel.co,
+			remoteok.com,remotive.com,weworkremotely.com,jobicy.com,arbeitnow.com,stackoverflow.com,
+			boards.greenhouse.io,job-boards.greenhouse.io,greenhouse.io,jobs.lever.co,lever.co,
+			myworkdayjobs.com,workday.com,smartrecruiters.com,ashbyhq.com,icims.com,jobvite.com,bamboohr.com,
+			taleo.net,brassring.com,successfactors.com,jobs.jobvite.com,naukri.com,foundit.in,monsterindia.com,
+			shine.com,instahyre.com,cutshort.io,weekday.works,jooble.org,adzuna.com,usajobs.gov,
+			facebook.com,twitter.com,x.com,reddit.com,youtube.com,medium.com,github.com,
+			google.com,bing.com,wikipedia.org,crunchbase.com,zoominfo.com,levels.fyi,
+			builtin.com,themuse.com,jobserve.com,cwjobs.co.uk,totaljobs.com,reed.co.uk,seek.com.au,
+			talent.com,jobstreet.com,glints.com,hired.com,toptal.com,arc.dev" />
+		<cfloop list="#blocked#" index="b" delimiters=",#chr(10)##chr(13)#">
+			<cfset bb = trim( b ) />
+			<cfif NOT len( bb )><cfcontinue /></cfif>
+			<cfif h EQ bb><cfreturn true /></cfif>
+			<cfif len( h ) GT len( bb ) AND right( h, len( bb ) + 1 ) EQ "." & bb><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
+	</cffunction>
+
+	<!--- Strip tags + decode the handful of HTML entities seen in listing titles/company names --->
+	<cffunction name="cleanListingText" access="private" returntype="string" output="false">
+		<cfargument name="raw" type="string" required="true" />
+		<cfset t = reReplace( arguments.raw, "<[^>]+>", " ", "all" ) />
+		<cfset t = decodeHtmlEntities( t ) />
+		<cfreturn trim( reReplace( t, "\s+", " ", "all" ) ) />
+	</cffunction>
+
+	<cffunction name="decodeHtmlEntities" access="private" returntype="string" output="false">
+		<cfargument name="raw" type="string" required="true" />
+		<cfset t = arguments.raw />
+		<cfset t = replace( t, "&amp;", "&", "all" ) />
+		<cfset t = replace( t, "&##39;", "'", "all" ) />
+		<cfset t = replace( t, "&##039;", "'", "all" ) />
+		<cfset t = replace( t, "&apos;", "'", "all" ) />
+		<cfset t = replace( t, "&quot;", """", "all" ) />
+		<cfset t = replace( t, "&##34;", """", "all" ) />
+		<cfset t = replace( t, "&lt;", "<", "all" ) />
+		<cfset t = replace( t, "&gt;", ">", "all" ) />
+		<cfset t = replace( t, "&nbsp;", " ", "all" ) />
+		<cfreturn t />
+	</cffunction>
+
 	<!--- Generic HTML title parser shared by Foundit, Shine, and Weekday scrapers --->
 	<cffunction name="parseGenericJobHtml" access="private" returntype="struct" output="false">
 		<cfargument name="htmlBody" type="string" required="true" />
@@ -2373,7 +2713,7 @@
 		<cfargument name="source" type="string" required="true" />
 		<cfif arguments.source EQ "adzuna_feed"><cfreturn 1 /></cfif>
 		<cfif arguments.source EQ "cf_global_watcher"><cfreturn 2 /></cfif>
-		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed"><cfreturn 2 /></cfif>
+		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "devjobsscanner_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed"><cfreturn 2 /></cfif>
 		<cfreturn 1 />
 	</cffunction>
 
@@ -2382,14 +2722,14 @@
 		<cfif arguments.source EQ "adzuna_feed"><cfreturn 1440 /></cfif>
 		<cfif arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "getcfmljobs_feed"><cfreturn 360 /></cfif>
 		<cfif arguments.source EQ "cf_global_watcher"><cfreturn 720 /></cfif>
-		<cfif arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed"><cfreturn 720 /></cfif>
+		<cfif arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "devjobsscanner_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed"><cfreturn 720 /></cfif>
 		<cfreturn 1440 />
 	</cffunction>
 
 	<cffunction name="buildSourceKey" access="private" returntype="string" output="false">
 		<cfargument name="source" type="string" required="true" />
 		<cfargument name="companyId" type="numeric" required="true" />
-		<cfif arguments.source EQ "cf_global_watcher" OR arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "adzuna_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed">
+		<cfif arguments.source EQ "cf_global_watcher" OR arguments.source EQ "remotive_feed" OR arguments.source EQ "arbeitnow_feed" OR arguments.source EQ "adzuna_feed" OR arguments.source EQ "getcfmljobs_feed" OR arguments.source EQ "google_cse_feed" OR arguments.source EQ "cutshort_scan" OR arguments.source EQ "linkedin_public" OR arguments.source EQ "foundit_scan" OR arguments.source EQ "shine_scan" OR arguments.source EQ "weekday_scan" OR arguments.source EQ "jooble_feed" OR arguments.source EQ "expertini_scan" OR arguments.source EQ "indeed_scan" OR arguments.source EQ "instahyre_scan" OR arguments.source EQ "devjobsscanner_scan" OR arguments.source EQ "remoteok_feed" OR arguments.source EQ "jobicy_feed" OR arguments.source EQ "remote_rss_feed" OR arguments.source EQ "reddit_feed" OR arguments.source EQ "usajobs_feed">
 			<cfreturn arguments.source />
 		</cfif>
 		<cfreturn arguments.source & ":" & arguments.companyId />
