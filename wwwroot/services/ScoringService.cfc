@@ -3,7 +3,7 @@
 	<cfproperty name="directKeywords" type="array" />
 
 	<cffunction name="init" access="public" returntype="any" output="false">
-		<cfset variables.ruleVersion = "v3_india_eligible" />
+		<cfset variables.ruleVersion = "v3_india_word_boundary" />
 		<cfset variables.directKeywords = [ "coldfusion", "cfml", "lucee", "mura" ] />
 		<!--- Secondary terms: full-stack roles that pair with CF backend tech. Only persist if a direct keyword also appears somewhere in title+desc. --->
 		<cfset variables.fullStackSignals = [ "full stack", "fullstack", "full-stack" ] />
@@ -66,10 +66,10 @@
 		<cfset t = lCase( arguments.jobText ) />
 		<cfset loc = lCase( arguments.locationText ) />
 
-		<!--- India locations in title/desc/location --->
+		<!--- India locations in title/desc/location (word-boundary match so "indiana" is not "india") --->
 		<cfset indiaTerms = [ "india", "bengaluru", "bangalore", "hyderabad", "chennai", "mumbai", "pune", "delhi", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "jaipur", "kochi", "thiruvananthapuram", "coimbatore", "indore" ] />
 		<cfloop array="#indiaTerms#" index="it">
-			<cfif findNoCase( it, t ) GT 0 OR findNoCase( it, loc ) GT 0>
+			<cfif termMatchesInText( t, it ) OR termMatchesInText( loc, it )>
 				<cfreturn "yes" />
 			</cfif>
 		</cfloop>
@@ -90,8 +90,8 @@
 			</cfif>
 		</cfloop>
 
-		<!--- US-only location signals (no remote + US city) --->
-		<cfset usStates = [ "united states", ", us", ", usa", "new york", "california", "texas", "florida", "virginia", "maryland", "georgia", "illinois", "washington, dc", "d.c.", "pennsylvania", "ohio", "north carolina", "massachusetts", "new jersey", "arizona", "colorado", "michigan", "minnesota", "tennessee", "oregon", "connecticut", "utah", "iowa", "alabama", "louisiana", "kentucky" ] />
+		<!--- US-only location signals (no remote + US city/state) --->
+		<cfset usStates = [ "united states", ", us", ", usa", "indiana", "indianapolis", "new york", "california", "texas", "florida", "virginia", "maryland", "georgia", "illinois", "washington, dc", "d.c.", "pennsylvania", "ohio", "north carolina", "massachusetts", "new jersey", "arizona", "colorado", "michigan", "minnesota", "tennessee", "oregon", "connecticut", "utah", "iowa", "alabama", "louisiana", "kentucky" ] />
 		<cfset hasRemote = ( findNoCase( "remote", t ) GT 0 OR findNoCase( "remote", loc ) GT 0 ) />
 
 		<cfif NOT hasRemote>
@@ -117,6 +117,19 @@
 		</cfif>
 
 		<cfreturn "unknown" />
+	</cffunction>
+
+	<cffunction name="termMatchesInText" access="public" returntype="boolean" output="false">
+		<cfargument name="haystack" type="string" required="true" />
+		<cfargument name="term" type="string" required="true" />
+		<cfset h = lCase( trim( arguments.haystack ) ) />
+		<cfset term = lCase( trim( arguments.term ) ) />
+		<cfif NOT len( h ) OR NOT len( term )><cfreturn false /></cfif>
+		<cfif find( " ", term ) GT 0>
+			<cfreturn findNoCase( term, h ) GT 0 />
+		</cfif>
+		<cfset escaped = reReplace( term, "([\.\^\$\|\?\*\+\(\)\[\]\{\}\\])", "\\\1", "all" ) />
+		<cfreturn reFindNoCase( "\b#escaped#\b", h, 1, true ) GT 0 />
 	</cffunction>
 
 	<cffunction name="matchedTerms" access="private" returntype="array" output="false">

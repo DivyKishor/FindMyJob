@@ -102,12 +102,39 @@
 			<cfset arrayAppend( params, { value: arguments.minScore, cfsqltype: "cf_sql_integer" } ) />
 		</cfif>
 		<cfif len( trim( arguments.locationKeyword ) )>
-			<cfset locationLike = "%" & arguments.locationKeyword & "%" />
-			<!--- India/remote often appear in title or description, not only the location column --->
-			<cfset fromSql = fromSql & " AND (lower(j.location) LIKE lower(?) OR lower(j.title) LIKE lower(?) OR lower(j.description) LIKE lower(?))" />
-			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
-			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
-			<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_longvarchar" } ) />
+			<cfset locKw = lCase( trim( arguments.locationKeyword ) ) />
+			<cfif locKw EQ "india">
+				<!--- Whole-word "india" only; exclude US state Indiana --->
+				<cfset fromSql = fromSql & " AND NOT (lower(j.location) LIKE '%indiana%' OR lower(j.title) LIKE '%indiana%' OR lower(j.description) LIKE '%indiana%')" />
+				<cfset fromSql = fromSql & " AND (" />
+				<cfset indiaFieldClauses = [] />
+				<cfloop list="j.location,j.title,j.description" index="fieldCol">
+					<cfset arrayAppend( indiaFieldClauses, "lower(" & fieldCol & ") LIKE '% india %'" ) />
+					<cfset arrayAppend( indiaFieldClauses, "lower(" & fieldCol & ") LIKE 'india %'" ) />
+					<cfset arrayAppend( indiaFieldClauses, "lower(" & fieldCol & ") LIKE '% india'" ) />
+					<cfset arrayAppend( indiaFieldClauses, "lower(" & fieldCol & ") LIKE '% india,%'" ) />
+					<cfset arrayAppend( indiaFieldClauses, "lower(" & fieldCol & ") LIKE '% india" & chr(41) & "'" ) />
+					<cfset arrayAppend( indiaFieldClauses, "lower(" & fieldCol & ") = 'india'" ) />
+				</cfloop>
+				<cfset indiaCities = [ "bengaluru", "bangalore", "hyderabad", "chennai", "mumbai", "pune", "delhi", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "jaipur", "kochi", "coimbatore", "indore" ] />
+				<cfloop array="#indiaCities#" index="cityTerm">
+					<cfset cityLike = "%#cityTerm#%" />
+					<cfset arrayAppend( indiaFieldClauses, 'lower(j.location) LIKE ?' ) />
+					<cfset arrayAppend( params, { value: cityLike, cfsqltype: "cf_sql_varchar" } ) />
+					<cfset arrayAppend( indiaFieldClauses, 'lower(j.title) LIKE ?' ) />
+					<cfset arrayAppend( params, { value: cityLike, cfsqltype: "cf_sql_varchar" } ) />
+					<cfset arrayAppend( indiaFieldClauses, 'lower(j.description) LIKE ?' ) />
+					<cfset arrayAppend( params, { value: cityLike, cfsqltype: "cf_sql_longvarchar" } ) />
+				</cfloop>
+				<cfset fromSql = fromSql & arrayToList( indiaFieldClauses, " OR " ) & ")" />
+			<cfelse>
+				<cfset locationLike = "%" & arguments.locationKeyword & "%" />
+				<!--- India/remote often appear in title or description, not only the location column --->
+				<cfset fromSql = fromSql & " AND (lower(j.location) LIKE lower(?) OR lower(j.title) LIKE lower(?) OR lower(j.description) LIKE lower(?))" />
+				<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
+				<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_varchar" } ) />
+				<cfset arrayAppend( params, { value: locationLike, cfsqltype: "cf_sql_longvarchar" } ) />
+			</cfif>
 		</cfif>
 		<cfif len( trim( arguments.rawSource ) )>
 			<cfset fromSql = fromSql & " AND j.raw_source = ?" />

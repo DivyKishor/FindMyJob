@@ -8,10 +8,7 @@
 <cfset pageError = "" />
 <cfset discoverySignals = [] />
 
-<cfset appBasePath = getDirectoryFromPath( cgi.script_name ) />
-<cfif left( appBasePath, 1 ) NEQ "/"><cfset appBasePath = "/" & appBasePath /></cfif>
-<cfif right( appBasePath, 1 ) NEQ "/"><cfset appBasePath = appBasePath & "/" /></cfif>
-<cfset indexUrl = appBasePath & "index.cfm" />
+<cfinclude template="includes/pathUtil.cfm" />
 <cfset signalsPageUrl = appBasePath & "discovery-signals.cfm" />
 
 <cftry>
@@ -22,81 +19,81 @@
 	</cfcatch>
 </cftry>
 
-<cfset signalsSortPrefix = "#signalsPageUrl#?" />
+<cfset signalsSortPrefix = signalsPageUrl & "?" />
+<cfset sigDirWhen = signalsSortBy EQ "created_at" AND signalsSortDir EQ "asc" ? "desc" : "asc" />
+<cfset sigDirScore = signalsSortBy EQ "confidence_score" AND signalsSortDir EQ "asc" ? "desc" : "asc" />
+<cfset sigDirDomain = signalsSortBy EQ "company_domain" AND signalsSortDir EQ "asc" ? "desc" : "asc" />
+<cfset sigDirType = signalsSortBy EQ "signal_type" AND signalsSortDir EQ "asc" ? "desc" : "asc" />
+<cfset sigDirQuery = signalsSortBy EQ "query_text" AND signalsSortDir EQ "asc" ? "desc" : "asc" />
 
-<cfset sigDirWhen = "asc" /><cfif signalsSortBy EQ "created_at" AND signalsSortDir EQ "asc"><cfset sigDirWhen = "desc" /></cfif>
-<cfset sigDirScore = "asc" /><cfif signalsSortBy EQ "confidence_score" AND signalsSortDir EQ "asc"><cfset sigDirScore = "desc" /></cfif>
-<cfset sigDirDomain = "asc" /><cfif signalsSortBy EQ "company_domain" AND signalsSortDir EQ "asc"><cfset sigDirDomain = "desc" /></cfif>
-<cfset sigDirType = "asc" /><cfif signalsSortBy EQ "signal_type" AND signalsSortDir EQ "asc"><cfset sigDirType = "desc" /></cfif>
-<cfset sigDirQuery = "asc" /><cfif signalsSortBy EQ "query_text" AND signalsSortDir EQ "asc"><cfset sigDirQuery = "desc" /></cfif>
+<cfset activeSection = "network" />
+<cfset pageTitle = "CF/OBSERVER | Discovery Network" />
+<cfset searchKeyword = "" />
+<cfset locationKeyword = "" />
+<cfset minScore = 0 />
+<cfset rawSourceFilter = "" />
+<cfset companyId = 0 />
+<cfset jobsAnchorQuery = "jobs_page=1" & "##jobs" />
+<cfset healthAnchorQuery = "jobs_page=1" & "##pipeline" />
+<cfset companiesAnchorQuery = "companies_page=1" & "##companies" />
+
+<cfinclude template="includes/layoutHead.cfm" />
+<cfinclude template="includes/layoutSidebar.cfm" />
+
+<main class="flex-1 flex flex-col min-w-0 bg-background relative overflow-hidden">
+<cfinclude template="includes/layoutTopbar.cfm" />
 
 <cfoutput>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>CF / Lucee discovery signals</title>
-	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-</head>
-<body class="bg-light">
-	<div class="container py-4">
-		<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-			<div>
-				<h1 class="h4 mb-1">CF / Lucee discovery signals (Bing RSS)</h1>
-				<div class="small text-secondary">Heuristic web leads from discovery runs — not the same as confirmed job postings. Refresh with <a href="#appBasePath#tasks/runDiscovery.cfm?force=1">runDiscovery?force=1</a>.</div>
-			</div>
-			<div>
-				<a class="btn btn-sm btn-outline-secondary" href="#indexUrl#">Back to dashboard</a>
-			</div>
-		</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-margin-desktop py-6 md:py-8 flex flex-col gap-6">
 
-		<cfif len( pageError )>
-			<div class="alert alert-danger">#encodeForHTML( pageError )#</div>
-		</cfif>
+<section class="bento-card p-6">
+<h1 class="text-xl text-on-surface font-bold mb-2">Discovery Network</h1>
+<p class="text-outline text-sm max-w-3xl">Heuristic CF/Lucee web leads from Bing RSS discovery — <strong class="text-on-surface">not</strong> the same as confirmed job postings in the Job Feed. Refresh with <a class="text-primary" href="#appBasePath#tasks/runDiscovery.cfm?force=1">Run Discovery (force)</a> or the daily pipeline.</p>
+</section>
 
-		<div class="card shadow-sm">
-			<div class="table-responsive">
-				<table class="table table-sm table-striped mb-0">
-					<thead class="table-light">
-						<tr>
-							<th><a class="text-decoration-none" href="#signalsSortPrefix#signals_sort_by=signal_type&amp;signals_sort_dir=#sigDirType#">Type</a></th>
-							<th><a class="text-decoration-none" href="#signalsSortPrefix#signals_sort_by=company_domain&amp;signals_sort_dir=#sigDirDomain#">Domain</a></th>
-							<th><a class="text-decoration-none" href="#signalsSortPrefix#signals_sort_by=query_text&amp;signals_sort_dir=#sigDirQuery#">Query</a></th>
-							<th class="small">Evidence</th>
-							<th><a class="text-decoration-none" href="#signalsSortPrefix#signals_sort_by=confidence_score&amp;signals_sort_dir=#sigDirScore#">Score</a></th>
-							<th>Link</th>
-							<th><a class="text-decoration-none" href="#signalsSortPrefix#signals_sort_by=created_at&amp;signals_sort_dir=#sigDirWhen#">When</a></th>
-						</tr>
-					</thead>
-					<tbody>
-						<cfif arrayLen( discoverySignals ) EQ 0>
-							<tr><td colspan="7" class="text-secondary">No signals yet.</td></tr>
-						<cfelse>
-							<cfloop array="#discoverySignals#" index="sig">
-								<tr>
-									<td>#encodeForHTML( sig.signal_type )#</td>
-									<td>#encodeForHTML( sig.company_domain )#</td>
-									<td class="small">#encodeForHTML( left( sig.query_text, 48 ) )#</td>
-									<td class="small">#encodeForHTML( left( sig.evidence_text, 120 ) )#</td>
-									<td>#val( sig.confidence_score )#</td>
-									<td>
-										<cfif len( trim( sig.target_url ) )>
-											<cfset sigHref = trim( sig.target_url ) />
-											<cfif reFindNoCase( "^https?://", sigHref ) EQ 0 AND reFindNoCase( "^//", sigHref ) EQ 0><cfset sigHref = "https://" & sigHref /></cfif>
-											<cfif left( sigHref, 2 ) EQ "//"><cfset sigHref = "https:" & sigHref /></cfif>
-											<a href="#encodeForHTMLAttribute( sigHref )#" target="_blank" rel="noopener noreferrer">open</a>
-										<cfelse>&mdash;</cfif>
-									</td>
-									<td class="small">#encodeForHTML( sig.created_at )#</td>
-								</tr>
-							</cfloop>
-						</cfif>
-					</tbody>
-				</table>
-			</div>
-		</div>
-	</div>
-</body>
-</html>
+<cfif len( pageError )>
+<div class="bento-card p-4 border-l-4 border-l-red-400 text-red-300 text-sm">#encodeForHTML( pageError )#</div>
+</cfif>
+
+<div class="bento-card overflow-x-auto">
+<table class="w-full text-left border-collapse min-w-[800px]">
+<thead>
+<tr class="bg-surface-container-low/50 text-outline text-[11px] uppercase tracking-widest border-b border-outline-variant/20">
+<th class="px-4 py-3"><a class="text-primary hover:underline" href="#signalsSortPrefix#signals_sort_by=signal_type&amp;signals_sort_dir=#sigDirType#">Type</a></th>
+<th class="px-4 py-3"><a class="text-primary hover:underline" href="#signalsSortPrefix#signals_sort_by=company_domain&amp;signals_sort_dir=#sigDirDomain#">Domain</a></th>
+<th class="px-4 py-3"><a class="text-primary hover:underline" href="#signalsSortPrefix#signals_sort_by=query_text&amp;signals_sort_dir=#sigDirQuery#">Query</a></th>
+<th class="px-4 py-3">Evidence</th>
+<th class="px-4 py-3"><a class="text-primary hover:underline" href="#signalsSortPrefix#signals_sort_by=confidence_score&amp;signals_sort_dir=#sigDirScore#">Score</a></th>
+<th class="px-4 py-3">Link</th>
+<th class="px-4 py-3"><a class="text-primary hover:underline" href="#signalsSortPrefix#signals_sort_by=created_at&amp;signals_sort_dir=#sigDirWhen#">When</a></th>
+</tr>
+</thead>
+<tbody class="text-sm divide-y divide-outline-variant/10">
+<cfif arrayLen( discoverySignals ) EQ 0>
+<tr><td colspan="7" class="px-4 py-6 text-outline">No signals yet. Run discovery from Operator tools.</td></tr>
+<cfelse>
+<cfloop array="#discoverySignals#" index="sig">
+<cfset sigHref = len( trim( sig.target_url ) ) ? trim( sig.target_url ) : "" />
+<cfif len( sigHref ) AND reFindNoCase( "^https?://", sigHref ) EQ 0><cfset sigHref = "https://" & sigHref /></cfif>
+<tr class="hover:bg-surface-container-high/30">
+<td class="px-4 py-3 text-on-surface">#encodeForHTML( sig.signal_type )#</td>
+<td class="px-4 py-3">#encodeForHTML( sig.company_domain )#</td>
+<td class="px-4 py-3 text-xs text-outline">#encodeForHTML( left( sig.query_text, 48 ) )#</td>
+<td class="px-4 py-3 text-xs text-outline">#encodeForHTML( left( sig.evidence_text, 120 ) )#</td>
+<td class="px-4 py-3 numerical">#val( sig.confidence_score )#</td>
+<td class="px-4 py-3">
+<cfif len( sigHref )><a class="text-primary text-xs font-semibold" href="#encodeForHTMLAttribute( sigHref )#" target="_blank" rel="noopener">View source</a><cfelse>&mdash;</cfif>
+</td>
+<td class="px-4 py-3 text-xs text-outline numerical">#encodeForHTML( sig.created_at )#</td>
+</tr>
+</cfloop>
+</cfif>
+</tbody>
+</table>
+</div>
+
+</div>
 </cfoutput>
+</main>
+
+<cfinclude template="includes/layoutFoot.cfm" />

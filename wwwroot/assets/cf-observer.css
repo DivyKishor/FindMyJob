@@ -1,0 +1,42 @@
+body {
+	background-color: #0c0c0e;
+	color: #e2e2e2;
+	-webkit-font-smoothing: antialiased;
+}
+.bento-card {
+	background: #0C0C0E;
+	border: 1px solid #1E1E24;
+	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.bento-card:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 10px 30px -10px rgba(130, 207, 255, 0.05);
+	border-color: rgba(130, 207, 255, 0.2);
+}
+.glass-header {
+	backdrop-filter: blur(12px);
+	background: rgba(18, 20, 20, 0.8);
+}
+.glow-blue-pulse {
+	animation: glow-pulse 2s infinite;
+}
+@keyframes glow-pulse {
+	0% { box-shadow: 0 0 5px rgba(130, 207, 255, 0.2); }
+	50% { box-shadow: 0 0 15px rgba(130, 207, 255, 0.5); }
+	100% { box-shadow: 0 0 5px rgba(130, 207, 255, 0.2); }
+}
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #3e4850; border-radius: 2px; }
+.numerical { font-family: 'JetBrains Mono', monospace; }
+.job-card.active {
+	border-left-color: #82cfff !important;
+	background-color: rgba(51, 53, 53, 0.4);
+}
+.radial-progress-svg { transform: rotate(-90deg); }
+.radial-progress-bg { fill: none; stroke: rgba(130, 207, 255, 0.05); }
+.radial-progress-val { fill: none; stroke-linecap: round; transition: stroke-dashoffset 1s ease-in-out; }
+.nav-link-active { background: rgba(130, 207, 255, 0.1); color: #82cfff; border-right: 2px solid #82cfff; }
+.status-success { background: rgba(130, 207, 255, 0.1); color: #82cfff; border: 1px solid rgba(130, 207, 255, 0.2); }
+.status-warn { background: rgba(255, 184, 118, 0.1); color: #ffb876; border: 1px solid rgba(255, 184, 118, 0.2); }
+.status-failed { background: rgba(255, 180, 171, 0.1); color: #ffb4ab; border: 1px solid rgba(255, 180, 171, 0.2); }

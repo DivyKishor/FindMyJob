@@ -1,15 +1,13 @@
 # ColdFusion Intelligence Engine (Phase 2a)
 
-Production-oriented **Adobe ColdFusion 2025 (CFML)** system that seeds companies, ingests **ColdFusion / CFML / Lucee** job postings from many public sources (job-board APIs, ATS boards, open-web search, and curated career pages), stores rows in **SQLite**, and provides both JSON APIs and a server-rendered Bootstrap dashboard. Focused on **India & remote-eligible** roles while still capturing CF openings worldwide.
+Production-oriented **Adobe ColdFusion 2025 (CFML)** system that seeds companies, ingests **ColdFusion / CFML / Lucee** job postings from many public sources (job-board APIs, ATS boards, open-web search, and curated career pages), stores rows in **SQLite**, and provides both JSON APIs and a server-rendered **CF/OBSERVER** dashboard. Focused on **India & remote-eligible** roles while still capturing CF openings worldwide.
 
 ## Recent updates (2026-06-04)
 
-- **DevJobsScanner** (`devjobsscanner_scan`): ingests ColdFusion/CFML/Lucee listings from [devjobsscanner.com](https://www.devjobsscanner.com) (`coldfusion-jobs`, `cfml-jobs`, `lucee-jobs`); jobs stored with `raw_source = devjobsscanner`.
-- **Employer promotion (opt-in)**: set `promote_companies: true` in the DevJobsScanner feed `ats_config` to resolve new employer names via Bing/Brave (`"<Company>" careers`) and register them as `career_page_scan` targets (skips job-board hosts). Default is **off**; cap with `max_promote_per_run`.
-- **Daily company-link enrichment**: after each `runAll()`, up to **15** companies per day with missing `website` or `careers_url` get links filled via the same search resolver (quota key `enrich_company_links`, ~12h interval). Only blank fields are updated.
-- **On-demand tasks**: `tasks/promoteDevJobsScannerEmployers.cfm` (backfill external_feed employers from past DevJobsScanner jobs), `tasks/enrichCompanyLinks.cfm` (manual link enrichment; `?max=50`, optional `brave_key`).
-- **Dashboard job filters**: location matches **title, description, and location**; keyword `coldfusion` / `cf` / `cfml` / `lucee` expands to all CF stack terms; stat card shows **matching vs total in database** with a warning and **Clear filters** when filters hide all rows.
-- **Scoring display**: job list and company `cf_likelihood_score` refresh use rule version **`v3_india_eligible`** consistently; job table sorts by per-job score (`js.score`).
+- **CF/OBSERVER dashboard** (`/index.cfm`): dark Tailwind UI with bento stats, pipeline health table, master-detail job feed (radial score rings), paginated companies/alerts, USP strip, and sidebar Operator tools. Shared layout in `wwwroot/includes/`; styles in `wwwroot/assets/cf-observer.css`.
+- **Pipeline metrics fix**: `RunStatusService.getPipelineMetric()` reads nested summary keys case-insensitively (fixes `COMPANIESPROCESSED` errors after JSON round-trip).
+- **Companies pagination**: `CompanyService.listPaged()` + filter dropdown limited to employers with jobs (`listWithJobsForFilter()`).
+- **DevJobsScanner**, employer promotion, company-link enrichment, and dashboard filter improvements (see git history).
 
 ## What is implemented now
 
@@ -18,8 +16,8 @@ Production-oriented **Adobe ColdFusion 2025 (CFML)** system that seeds companies
 - **Modular services**: database bootstrap, HTTP client, Greenhouse parser, scrape orchestrator (rate-limited delay between companies), job UPSERT
 - **Seed data**: Greenhouse demo boards, the full set of feed sources (board APIs, ATS scans, CF Global Watcher, Reddit, USAJOBS), CF **product-stack** employers (e.g. ZOLL/emsCharts), and a **curated `career_page_scan` list** (notable CF/Lucee organizations—telecom, auto, retail, media, agencies, hosts, recruiters); see `wwwroot/config/seed_companies.json`
 - **Scoring / ingest gate**: jobs are stored and scored only when title or description mentions **coldfusion**, **cfml**, **lucee**, or **mura** (Mura CMS; case-insensitive), **or** when a full-stack role names ColdFusion/CFML as the backend. Rule version `v3_india_eligible`: scores 0–100 where **100** = CF + India or confirmed global-remote, **80** = CF + likely remote-friendly, **50** = CF match but location unclear, **20** = CF match but US work-auth / clearance required. India eligibility is a **score layer**, not an ingest gate, so global jobs still appear at low scores. Optional **Prune non-CF jobs** task removes legacy rows that fail the keyword check.
-- **UI**: ColdFusion-only Bootstrap dashboard at `/index.cfm`
-- **Dashboard UX**: sortable job/alert columns, pagination, last-run status panel, **discovery signals** table (Bing RSS evidence for CF/Lucee-related domains), job description previews, and quick filters including **India-eligible (70+)**, **Best matches (80+)**, location shortcuts, and **Global CF (any location)** (`source=cf_global_watcher`, min score 0). Filtered job count vs **total in database**; location/keyword filters search across posting text (not only the `location` column).
+- **UI**: **CF/OBSERVER** dark dashboard at `/index.cfm` (Tailwind CDN + Geist/JetBrains Mono). Master-detail job feed, pipeline health, discovery network at `/discovery-signals.cfm`.
+- **Dashboard UX**: bento telemetry cards, sidebar nav (Overview, Job Feed, Health, Network, Companies), Operator tools (seed, pipeline, APIs), India-eligible toggle, keyword/location filters across posting text, paginated companies (25/page) and jobs/alerts.
 - **Multi-source ingestion**:
   - **Job-board / remote APIs**: Remotive, ArbeitNow, **Remote OK**, **Jobicy**, **We Work Remotely (RSS)**, **Adzuna** (multi-country: us, gb, ca, au, de, in, fr, nl, sg, nz, at, ch, be, br, za, pl), **Jooble** (multi-region), **[GetCFMLJobs.com](https://www.getcfmljobs.com/)** (community CFML board)
   - **India boards / ATS scans**: LinkedIn public search, Cutshort, Foundit, Shine, Weekday, Indeed, Instahyre, Expertini, Greenhouse

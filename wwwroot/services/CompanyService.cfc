@@ -51,6 +51,72 @@
 		<cfreturn rows />
 	</cffunction>
 
+	<cffunction name="listPaged" access="public" returntype="struct" output="false">
+		<cfargument name="sortBy" type="string" required="false" default="job_count" />
+		<cfargument name="sortDir" type="string" required="false" default="desc" />
+		<cfargument name="page" type="numeric" required="false" default="1" />
+		<cfargument name="pageSize" type="numeric" required="false" default="25" />
+		<cfif arguments.page LT 1><cfset arguments.page = 1 /></cfif>
+		<cfif arguments.pageSize LT 1><cfset arguments.pageSize = 25 /></cfif>
+		<cfif arguments.pageSize GT 200><cfset arguments.pageSize = 200 /></cfif>
+		<cfset sb = lCase( trim( arguments.sortBy ) ) />
+		<cfset sd = lCase( trim( arguments.sortDir ) ) />
+		<cfif sd NEQ "asc"><cfset sd = "desc" /></cfif>
+		<cfif listFindNoCase( "name,careers_source,score,job_count,created_at", sb ) EQ 0><cfset sb = "job_count" /></cfif>
+		<cfset orderExpr = "lower(c.name)" />
+		<cfif sb EQ "careers_source"><cfset orderExpr = "lower(c.careers_source)" /></cfif>
+		<cfif sb EQ "score"><cfset orderExpr = "c.cf_likelihood_score" /></cfif>
+		<cfif sb EQ "job_count"><cfset orderExpr = "(SELECT COUNT(*) FROM jobs j WHERE j.company_id = c.id)" /></cfif>
+		<cfif sb EQ "created_at"><cfset orderExpr = "datetime(c.created_at)" /></cfif>
+		<cfset countQ = queryExecute( "SELECT COUNT(*) AS cnt FROM companies c", {}, { datasource: ds() } ) />
+		<cfset totalRows = val( countQ[ listFirst( countQ.columnList ) ][ 1 ] ) />
+		<cfif totalRows EQ 0><cfset totalPages = 1 /><cfelse><cfset totalPages = ceiling( totalRows / arguments.pageSize ) /></cfif>
+		<cfif arguments.page GT totalPages><cfset arguments.page = totalPages /></cfif>
+		<cfset offsetRows = ( arguments.page - 1 ) * arguments.pageSize />
+		<cfset q = queryExecute(
+			"SELECT c.id, c.name, c.website, c.careers_url, c.careers_source, c.ats_config, c.cf_likelihood_score AS score,
+			        (SELECT COUNT(*) FROM jobs j WHERE j.company_id = c.id) AS job_count,
+			        c.created_at, c.updated_at
+			 FROM companies c
+			 ORDER BY " & orderExpr & " " & sd & ", c.id DESC
+			 LIMIT ? OFFSET ?",
+			[
+				{ value: arguments.pageSize, cfsqltype: "cf_sql_integer" },
+				{ value: offsetRows, cfsqltype: "cf_sql_integer" }
+			],
+			{ datasource: ds() }
+		) />
+		<cfset rows = variables.databaseService.queryToArray( q ) />
+		<cfloop array="#rows#" index="rowItem">
+			<cfset rowItem.ats_config = parseJsonColumn( rowItem.ats_config ) />
+			<cfset rowItem.score = val( rowItem.score ) />
+			<cfset rowItem.job_count = val( rowItem.job_count ) />
+		</cfloop>
+		<cfreturn {
+			rows: rows,
+			totalRows: totalRows,
+			page: arguments.page,
+			pageSize: arguments.pageSize,
+			totalPages: totalPages,
+			sortBy: sb,
+			sortDir: sd
+		} />
+	</cffunction>
+
+	<!--- Employers that have at least one job (for filter dropdown). --->
+	<cffunction name="listWithJobsForFilter" access="public" returntype="array" output="false">
+		<cfset q = queryExecute(
+			"SELECT c.id, c.name,
+			        (SELECT COUNT(*) FROM jobs j WHERE j.company_id = c.id) AS job_count
+			 FROM companies c
+			 WHERE EXISTS ( SELECT 1 FROM jobs j WHERE j.company_id = c.id )
+			 ORDER BY lower(c.name)",
+			{},
+			{ datasource: ds() }
+		) />
+		<cfreturn variables.databaseService.queryToArray( q ) />
+	</cffunction>
+
 	<cffunction name="getAllQuery" access="public" returntype="query" output="false">
 		<cfreturn queryExecute(
 			"SELECT id, name, website, careers_url, careers_source, ats_config, cf_likelihood_score

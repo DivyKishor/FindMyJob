@@ -2636,7 +2636,7 @@
 
 		<!--- Extract location from HTML if not already parsed --->
 		<cfif NOT len( trim( out.location ) )>
-			<cfset locMatch = reMatchNoCase( "(Bengaluru|Bangalore|Mumbai|Delhi|Hyderabad|Chennai|Pune|Kolkata|Noida|Gurgaon|Gurugram|Remote|India|United States|USA)[^<""]*", s ) />
+			<cfset locMatch = reMatchNoCase( "\b(Bengaluru|Bangalore|Mumbai|Delhi|Hyderabad|Chennai|Pune|Kolkata|Noida|Gurgaon|Gurugram|Remote|India|United States|USA)\b[^<""]*", s ) />
 			<cfif isArray( locMatch ) AND arrayLen( locMatch ) GT 0>
 				<cfset out.location = trim( left( locMatch[ 1 ], 120 ) ) />
 			</cfif>
