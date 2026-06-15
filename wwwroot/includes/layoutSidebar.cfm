@@ -44,6 +44,8 @@
 <cfoutput>
 <a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/seed.cfm">Seed</a>
 <a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/runDiscovery.cfm">Run Discovery</a>
+<a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/checkJobExpiry.cfm">Check expiry</a>
+<a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/setupSchedule.cfm" title="Registers Lucee scheduled tasks">Setup schedule</a>
 <a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/pruneIrrelevantJobs.cfm">Prune non-CF</a>
 <a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/enrichCompanyLinks.cfm">Enrich links</a>
 <a class="px-3 py-1 text-outline hover:text-primary" href="#appBasePath#tasks/promoteDevJobsScannerEmployers.cfm">Promote employers</a>

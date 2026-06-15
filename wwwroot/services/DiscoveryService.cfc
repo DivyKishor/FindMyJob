@@ -25,9 +25,9 @@
 
 	<cffunction name="runDiscovery" access="public" returntype="struct" output="false">
 		<cfargument name="forceRun" type="boolean" required="false" default="false" />
-		<cfset queryPlans = buildQueryPlans() />
-		<cfset seenDomains = {} />
-		<cfset summary = { queriesTried: 0, signalsStored: 0, companiesUpserted: 0, errors: [] } />
+		<cfset var queryPlans = buildQueryPlans() />
+		<cfset var seenDomains = {} />
+		<cfset var summary = { queriesTried: 0, signalsStored: 0, companiesUpserted: 0, errors: [] } />
 
 		<cfloop array="#queryPlans#" index="plan">
 			<cfset sourceKey = "discovery:" & hash( plan.signal_type & "|" & plan.query_text ) />
@@ -182,7 +182,55 @@
 			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:europeremotely.com" },
 			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:virtualvocations.com" },
 			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:outsourcely.com" },
-			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:freelancer.com" }
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:freelancer.com" },
+
+			<!--- Intern / junior roles --->
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion intern job hiring" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "CFML internship developer" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "junior ColdFusion developer job" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "junior CFML developer hiring" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "junior ColdFusion developer India" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "junior Lucee developer job opening" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion intern site:linkedin.com/jobs" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "junior ColdFusion OR cfml developer site:linkedin.com/jobs" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion internship site:indeed.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion internship site:handshake.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "CFML junior developer site:wellfound.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion intern site:weworkremotely.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "junior coldfusion developer site:naukri.com India" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: """junior"" OR ""intern"" coldfusion developer remote" },
+
+			<!--- Community / forum signals: Adobe forums, LAS, Ortus --->
+			{ signal_type: "ecosystem_signal", source_name: "bing_rss", query_text: "site:community.adobe.com coldfusion developer job hiring" },
+			{ signal_type: "ecosystem_signal", source_name: "bing_rss", query_text: "site:lucee.org developer hiring job" },
+			{ signal_type: "ecosystem_signal", source_name: "bing_rss", query_text: "site:community.ortussolutions.com job OR hiring OR developer" },
+			{ signal_type: "ecosystem_signal", source_name: "bing_rss", query_text: "Lucee Association Switzerland coldfusion developer" },
+			{ signal_type: "community_signal", source_name: "bing_rss", query_text: "CFML Slack job hiring coldfusion" },
+			{ signal_type: "community_signal", source_name: "bing_rss", query_text: "cfml.slack.com job OR internship OR hiring" },
+
+			<!--- Sector-targeted queries derived from resume employment history (insurance, gov, banking, industrial, marketing) --->
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer insurance company job hiring" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "CFML developer insurance insuretech remote" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer state government agency hiring" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion OR cfml developer site:governmentjobs.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion OR cfml developer site:usajobs.gov" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer banking financial services job" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "CFML developer fintech bank legacy systems" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer utilities energy industrial GE" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer marketing publishing media agency" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer healthcare nonprofit public sector" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: """ColdFusion"" OR ""CFML"" developer site:idealist.org" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "ColdFusion developer Oregon Washington state job" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "Cornerstone ColdFusion insurance developer hiring" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "Wells Fargo ColdFusion CFML developer opening" },
+
+			<!--- Additional remote platforms from LinkedIn post (not yet covered) --->
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:remotive.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "cfml OR coldfusion developer site:remote4me.com" },
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "coldfusion developer site:remotees.com" },
+
+			<!--- PALADEM — sourced from CFML Slack #jobs May 28 2026 --->
+			{ signal_type: "job_discovery", source_name: "bing_rss", query_text: "PALADEM ColdFusion developer job" }
 		] />
 	</cffunction>
 

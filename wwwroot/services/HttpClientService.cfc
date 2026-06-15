@@ -82,6 +82,10 @@
 
 		<cfset code = val( listFirst( httpRes.statusCode, " " ) ) />
 		<cfif code GTE 200 AND code LT 300>
+			<!--- Guard: some Lucee builds omit fileContent on connection-level oddities even with a 2xx status --->
+			<cfif NOT structKeyExists( httpRes, "fileContent" )>
+				<cfreturn { ok: false, retryable: true, statusError: false, content: "", error: "key [FILECONTENT] doesn't exist for GET #arguments.url# (HTTP #code#)" } />
+			</cfif>
 			<cfreturn { ok: true, retryable: false, statusError: false, content: httpRes.fileContent, error: "" } />
 		</cfif>
 		<!--- 429 + 5xx are transient and worth retrying; other 4xx are not --->

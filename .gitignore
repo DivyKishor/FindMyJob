@@ -1,6 +1,25 @@
 # SQLite database (local)
 wwwroot/data/*.db
 wwwroot/data/*.db-*
+coldfusion_intel.db
+*.db-shm
+*.db-wal
+
+# Local agent / IDE session settings
+.claude/
+
+# Real config with secrets (use app.example.json as the template)
+wwwroot/config/app.json
+
+# Test runtime artifacts
+tests/results/
+.testbox/
+
+# CommandBox / TestBox install + server artifacts
+testbox/
+.engine/
+.commandbox/
+server-*.json.bak
 
 # Logs
 wwwroot/logs/*.log

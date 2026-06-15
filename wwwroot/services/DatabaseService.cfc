@@ -114,6 +114,30 @@
 		<cfset executeStatements( indexStatements ) />
 	</cffunction>
 
+	<!---
+		Safe column migrations for existing databases.
+		SQLite does not support ALTER TABLE ADD COLUMN IF NOT EXISTS before 3.37,
+		so we wrap each in try/catch and ignore "duplicate column" errors.
+	--->
+	<cffunction name="ensureMigrations" access="public" returntype="void" output="false">
+		<cfset var migrations = [
+			"ALTER TABLE jobs ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+			"ALTER TABLE jobs ADD COLUMN last_checked_at TEXT",
+			"ALTER TABLE jobs ADD COLUMN work_type TEXT NOT NULL DEFAULT 'unknown'",
+			"ALTER TABLE jobs ADD COLUMN first_seen_at TEXT",
+			"UPDATE jobs SET first_seen_at = fetched_at WHERE first_seen_at IS NULL",
+			"CREATE INDEX IF NOT EXISTS idx_jobs_active ON jobs(is_active)",
+			"CREATE INDEX IF NOT EXISTS idx_jobs_work_type ON jobs(work_type)",
+			"CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at)"
+		] />
+		<cfloop array="#migrations#" index="stmt">
+			<cftry>
+				<cfset queryExecute( stmt, {}, { datasource: variables.datasource } ) />
+				<cfcatch type="any"><!--- column already exists or other non-fatal — skip ---></cfcatch>
+			</cftry>
+		</cfloop>
+	</cffunction>
+
 	<cffunction name="executeStatements" access="private" returntype="void" output="false">
 		<cfargument name="statements" type="array" required="true" />
 		<cfloop array="#arguments.statements#" index="stmt">

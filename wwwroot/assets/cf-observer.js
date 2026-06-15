@@ -4,64 +4,66 @@
 	function qs(sel, root) { return (root || document).querySelector(sel); }
 	function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
-	// Master-detail job feed
-	var cards = qsa('.job-card');
-	var detailTitle = qs('#detail-title');
-	var detailMeta = qs('#detail-meta');
-	var detailDesc = qs('#detail-description');
-	var detailInsight = qs('#detail-insight');
-	var detailApply = qs('#detail-apply');
-	var detailPane = qs('#detail-pane');
+	// ── mobile nav burger ──
+	var burger = qs('#fp-nav-burger');
+	var menu = qs('#fp-nav-menu');
+	if (burger && menu) {
+		burger.addEventListener('click', function () {
+			menu.classList.toggle('fp-nav-menu--open');
+		});
+	}
 
-	function selectJob(card) {
-		if (!card) return;
-		cards.forEach(function (c) { c.classList.remove('active'); });
-		card.classList.add('active');
-		if (detailTitle) detailTitle.textContent = card.getAttribute('data-title') || '';
-		if (detailMeta) detailMeta.innerHTML = card.getAttribute('data-meta') || '';
-		if (detailDesc) detailDesc.textContent = card.getAttribute('data-description') || '';
-		if (detailInsight) detailInsight.textContent = card.getAttribute('data-insight') || '';
-		if (detailApply) {
-			var link = card.getAttribute('data-link') || '';
-			if (link) {
-				detailApply.href = link;
-				detailApply.classList.remove('opacity-50', 'pointer-events-none');
+	// ── saved roles (localStorage) ──
+	var SAVED_KEY = 'fp-saved-roles';
+
+	function getSaved() {
+		try {
+			var raw = window.localStorage.getItem(SAVED_KEY);
+			var ids = raw ? JSON.parse(raw) : [];
+			return Array.isArray(ids) ? ids : [];
+		} catch (e) {
+			return [];
+		}
+	}
+
+	function setSaved(ids) {
+		try {
+			window.localStorage.setItem(SAVED_KEY, JSON.stringify(ids));
+		} catch (e) { /* ignore */ }
+	}
+
+	function updateSavedCount(ids) {
+		var counter = qs('#nav-saved-count');
+		if (counter) counter.textContent = String(ids.length);
+	}
+
+	function syncToggleStates(ids) {
+		qsa('.fp-save-toggle').forEach(function (btn) {
+			var id = btn.getAttribute('data-job-id');
+			btn.classList.toggle('fp-save--on', ids.indexOf(id) !== -1);
+		});
+	}
+
+	var savedIds = getSaved();
+	updateSavedCount(savedIds);
+	syncToggleStates(savedIds);
+
+	qsa('.fp-save-toggle').forEach(function (btn) {
+		btn.addEventListener('click', function (evt) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			var id = btn.getAttribute('data-job-id');
+			if (!id) return;
+			var ids = getSaved();
+			var idx = ids.indexOf(id);
+			if (idx === -1) {
+				ids.push(id);
 			} else {
-				detailApply.href = '#';
-				detailApply.classList.add('opacity-50', 'pointer-events-none');
+				ids.splice(idx, 1);
 			}
-		}
-		if (detailPane) {
-			detailPane.style.opacity = '0';
-			setTimeout(function () {
-				detailPane.style.transition = 'opacity 0.3s ease';
-				detailPane.style.opacity = '1';
-			}, 50);
-		}
-	}
-
-	cards.forEach(function (card) {
-		card.addEventListener('click', function () { selectJob(card); });
+			setSaved(ids);
+			updateSavedCount(ids);
+			syncToggleStates(ids);
+		});
 	});
-	if (cards.length) selectJob(cards[0]);
-
-	// India-eligible toggle -> navigate with min_score=70
-	var indiaToggle = qs('#toggle-india-eligible');
-	if (indiaToggle) {
-		indiaToggle.addEventListener('click', function () {
-			var url = indiaToggle.getAttribute('data-on-url');
-			var off = indiaToggle.getAttribute('data-off-url');
-			var on = indiaToggle.getAttribute('aria-checked') === 'true';
-			window.location.href = on ? off : url;
-		});
-	}
-
-	// Scoring accordion
-	var scoringToggle = qs('#scoring-toggle');
-	var scoringPanel = qs('#scoring-panel');
-	if (scoringToggle && scoringPanel) {
-		scoringToggle.addEventListener('click', function () {
-			scoringPanel.classList.toggle('hidden');
-		});
-	}
 })();

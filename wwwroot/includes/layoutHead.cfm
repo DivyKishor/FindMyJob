@@ -1,5 +1,6 @@
 <cfparam name="pageTitle" default="CF/OBSERVER | Dashboard" />
 <cfparam name="pageDescription" default="ColdFusion job intelligence for India and remote CFML roles." />
+<cfparam name="bodyClass" default="flex h-screen overflow-hidden selection:bg-primary/30 bg-background text-on-surface" />
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
@@ -8,7 +9,7 @@
 <meta name="description" content="<cfoutput>#encodeForHTMLAttribute( pageDescription )#</cfoutput>"/>
 <title><cfoutput>#encodeForHTML( pageTitle )#</cfoutput></title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Geist:wght@100..900&amp;family=Archivo:wght@400;500;600;700;800&amp;family=Bricolage+Grotesque:opsz,wght@12..96,400..800&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <link href="<cfoutput>#assetBase#</cfoutput>cf-observer.css" rel="stylesheet"/>
 <script id="tailwind-config">
@@ -47,4 +48,4 @@ tailwind.config = {
 };
 </script>
 </head>
-<body class="flex h-screen overflow-hidden selection:bg-primary/30 bg-background text-on-surface">
+<body class="<cfoutput>#bodyClass#</cfoutput>">
