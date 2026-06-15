@@ -6,6 +6,8 @@
 	<cfproperty name="loggerService" type="any" />
 	<cfproperty name="sourceQuotaService" type="any" />
 	<cfproperty name="scoringService" type="any" />
+	<cfproperty name="atsDetector" type="any" />
+	<cfproperty name="careerPageDiscoverer" type="any" />
 
 	<cffunction name="init" access="public" returntype="any" output="false">
 		<cfargument name="companyService" type="any" required="true" />
@@ -15,6 +17,8 @@
 		<cfargument name="loggerService" type="any" required="true" />
 		<cfargument name="sourceQuotaService" type="any" required="true" />
 		<cfargument name="scoringService" type="any" required="true" />
+		<cfargument name="atsDetector" type="any" required="false" default="" />
+		<cfargument name="careerPageDiscoverer" type="any" required="false" default="" />
 		<cfset variables.companyService = arguments.companyService />
 		<cfset variables.jobService = arguments.jobService />
 		<cfset variables.httpClientService = arguments.httpClientService />
@@ -22,11 +26,21 @@
 		<cfset variables.loggerService = arguments.loggerService />
 		<cfset variables.sourceQuotaService = arguments.sourceQuotaService />
 		<cfset variables.scoringService = arguments.scoringService />
+		<cfif isObject( arguments.atsDetector )>
+			<cfset variables.atsDetector = arguments.atsDetector />
+		<cfelse>
+			<cfset variables.atsDetector = createObject( "component", "services.AtsDetector" ).init() />
+		</cfif>
+		<cfif isObject( arguments.careerPageDiscoverer )>
+			<cfset variables.careerPageDiscoverer = arguments.careerPageDiscoverer />
+		<cfelse>
+			<cfset variables.careerPageDiscoverer = createObject( "component", "services.CareerPageDiscoverer" ).init( variables.atsDetector ) />
+		</cfif>
 		<cfreturn this />
 	</cffunction>
 
 	<cffunction name="runAll" access="public" returntype="struct" output="false">
-		<cfset summary = { companiesProcessed: 0, jobsUpserted: 0, errors: [], quotaGuardSkips: 0, scanBudgetSkips: 0, sourceHealth: {}, errorClasses: {}, companyLinksEnriched: 0 } />
+		<cfset var summary = { companiesProcessed: 0, jobsUpserted: 0, errors: [], quotaGuardSkips: 0, scanBudgetSkips: 0, sourceHealth: {}, errorClasses: {}, companyLinksEnriched: 0 } />
 		<!--- Many seeded employers use career_page_scan; cap only guards runaway time (each scan may fetch sub-pages) --->
 		<cfset maxCareerScanPerRun = 120 />
 		<cfset careerScanProcessed = 0 />
@@ -422,14 +436,7 @@
 
 	<cffunction name="hrefLooksLikeJobListingPath" access="private" returntype="boolean" output="false">
 		<cfargument name="fullUrl" type="string" required="true" />
-		<cfset u = lCase( trim( arguments.fullUrl ) ) />
-		<cfif findNoCase( "gh_jid", u ) GT 0 OR findNoCase( "?job=", u ) GT 0 OR findNoCase( "&job=", u ) GT 0 OR findNoCase( "myworkdayjobs.com", u ) GT 0 OR findNoCase( "lever.co", u ) GT 0 OR findNoCase( "boards.greenhouse.io", u ) GT 0 OR findNoCase( "job-boards.greenhouse.io", u ) GT 0 OR findNoCase( "smartrecruiters.com", u ) GT 0 OR findNoCase( "ashbyhq.com", u ) GT 0 OR findNoCase( "icims.com", u ) GT 0 OR findNoCase( "successfactors.com", u ) GT 0 OR findNoCase( "taleo.net", u ) GT 0 OR findNoCase( "bamboohr.com", u ) GT 0 OR findNoCase( "darwinbox", u ) GT 0 OR findNoCase( "cutshort.io", u ) GT 0 OR findNoCase( "/job/", u ) GT 0 OR findNoCase( "/jobs/", u ) GT 0 OR findNoCase( "/jobs/search", u ) GT 0 OR findNoCase( "/job-search", u ) GT 0 OR findNoCase( "/position", u ) GT 0 OR findNoCase( "/opening", u ) GT 0 OR findNoCase( "/vacancy", u ) GT 0 OR findNoCase( "/requisition", u ) GT 0>
-			<cfreturn true />
-		</cfif>
-		<cfif findNoCase( "/careers/", u ) GT 0 AND listLen( reReplace( listLast( u, "/" ), "[?##].*$", "", "all" ), "-" ) GTE 3>
-			<cfreturn true />
-		</cfif>
-		<cfreturn false />
+		<cfreturn variables.careerPageDiscoverer.hrefLooksLikeJobListingPath( arguments.fullUrl ) />
 	</cffunction>
 
 	<cffunction name="collectSameHostJobLikeUrls" access="private" returntype="array" output="false">
@@ -511,19 +518,14 @@
 	<cffunction name="firstProbableJobUrlFromArray" access="private" returntype="string" output="false">
 		<cfargument name="candidateUrls" type="array" required="true" />
 		<cfargument name="careersUrl" type="string" required="true" />
-		<cfloop array="#arguments.candidateUrls#" index="cand">
-			<cfif isProbableJobPostingUrl( cand, arguments.careersUrl )>
-				<cfreturn cand />
-			</cfif>
-		</cfloop>
-		<cfreturn "" />
+		<cfreturn variables.careerPageDiscoverer.firstProbableJobUrlFromArray( arguments.candidateUrls, arguments.careersUrl ) />
 	</cffunction>
 
 	<cffunction name="findBestJobLink" access="private" returntype="struct" output="false">
 		<cfargument name="htmlBody" type="string" required="true" />
 		<cfargument name="baseUrl" type="string" required="true" />
 		<cfargument name="keywords" type="array" required="true" />
-		<cfset result = { link: "", title: "" } />
+		<cfset var result = { link: "", title: "" } />
 		<cfset anchors = reMatchNoCase( "(?is)<a\\b[^>]*href\\s*=\\s*[^>]*>.*?</a>", arguments.htmlBody ) />
 		<cfif NOT isArray( anchors )>
 			<cfreturn result />
@@ -560,51 +562,13 @@
 
 	<cffunction name="extractHref" access="private" returntype="string" output="false">
 		<cfargument name="anchorHtml" type="string" required="true" />
-		<cfset hrefPos = findNoCase( "href", arguments.anchorHtml ) />
-		<cfif hrefPos LTE 0><cfreturn "" /></cfif>
-		<cfset eqPos = find( "=", arguments.anchorHtml, hrefPos ) />
-		<cfif eqPos LTE 0><cfreturn "" /></cfif>
-		<cfset rawValue = trim( mid( arguments.anchorHtml, eqPos + 1, len( arguments.anchorHtml ) - eqPos ) ) />
-		<cfif NOT len( rawValue )><cfreturn "" /></cfif>
-		<cfset firstChar = left( rawValue, 1 ) />
-		<cfif firstChar EQ chr(34) OR firstChar EQ chr(39)>
-			<cfset endPos = find( firstChar, rawValue, 2 ) />
-			<cfif endPos GT 2>
-				<cfreturn trim( mid( rawValue, 2, endPos - 2 ) ) />
-			</cfif>
-		<cfelse>
-			<cfset endSpace = find( " ", rawValue ) />
-			<cfset endTag = find( ">", rawValue ) />
-			<cfif endSpace GT 0 AND endTag GT 0>
-				<cfset endPos = min( endSpace, endTag ) />
-			<cfelseif endSpace GT 0>
-				<cfset endPos = endSpace />
-			<cfelseif endTag GT 0>
-				<cfset endPos = endTag />
-			<cfelse>
-				<cfset endPos = 0 />
-			</cfif>
-			<cfif endPos GT 1>
-				<cfreturn trim( left( rawValue, endPos - 1 ) ) />
-			</cfif>
-		</cfif>
-		<cfreturn "" />
+		<cfreturn variables.careerPageDiscoverer.extractHref( arguments.anchorHtml ) />
 	</cffunction>
 
 	<cffunction name="absolutizeUrl" access="private" returntype="string" output="false">
 		<cfargument name="baseUrl" type="string" required="true" />
 		<cfargument name="targetUrl" type="string" required="true" />
-		<cftry>
-			<cfset baseObj = createObject( "java", "java.net.URL" ).init( arguments.baseUrl ) />
-			<cfset resolvedObj = createObject( "java", "java.net.URL" ).init( baseObj, arguments.targetUrl ) />
-			<cfreturn toString( resolvedObj.toString() ) />
-			<cfcatch type="any">
-				<cfif left( arguments.targetUrl, 4 ) EQ "http">
-					<cfreturn arguments.targetUrl />
-				</cfif>
-				<cfreturn "" />
-			</cfcatch>
-		</cftry>
+		<cfreturn variables.careerPageDiscoverer.absolutizeUrl( arguments.baseUrl, arguments.targetUrl ) />
 	</cffunction>
 
 	<cffunction name="containsKeyword" access="private" returntype="boolean" output="false">
@@ -1158,7 +1122,7 @@
 
 	<!--- Re-fetches jobs stuck under the "Unknown Company" placeholder and reassigns the real employer parsed from the live page. --->
 	<cffunction name="backfillUnknownCompanyJobs" access="public" returntype="struct" output="false">
-		<cfset result = { examined: 0, reassigned: 0, deduped: 0, unresolved: 0, errors: [] } />
+		<cfset var result = { examined: 0, reassigned: 0, deduped: 0, unresolved: 0, errors: [] } />
 		<cfset jobsQ = variables.jobService.getUnknownCompanyJobs() />
 		<cfset result.examined = jobsQ.recordCount />
 		<cfloop from="1" to="#jobsQ.recordCount#" index="r">
@@ -2334,7 +2298,7 @@
 	<cffunction name="backfillDevJobsScannerEmployers" access="public" returntype="struct" output="false">
 		<cfargument name="maxPromote" type="numeric" required="false" default="50" />
 		<cfargument name="braveApiKey" type="string" required="false" default="" />
-		<cfset summary = { candidates: 0, attempted: 0, promoted: 0, names: [] } />
+		<cfset var summary = { candidates: 0, attempted: 0, promoted: 0, names: [] } />
 
 		<cfset q = variables.companyService.listUnpromotedExternalEmployers( "devjobsscanner" ) />
 		<cfset summary.candidates = q.recordCount />
@@ -2434,7 +2398,7 @@
 	<cffunction name="enrichCompanyLinks" access="public" returntype="struct" output="false">
 		<cfargument name="maxEnrich" type="numeric" required="false" default="15" />
 		<cfargument name="braveApiKey" type="string" required="false" default="" />
-		<cfset summary = { candidates: 0, attempted: 0, enriched: 0, names: [] } />
+		<cfset var summary = { candidates: 0, attempted: 0, enriched: 0, names: [] } />
 		<cfif arguments.maxEnrich LTE 0><cfreturn summary /></cfif>
 
 		<cfset q = variables.companyService.listCompaniesMissingLinks( arguments.maxEnrich ) />
@@ -2475,40 +2439,13 @@
 	<!--- Lower-cased registrable host from a URL (drops scheme, path, port, leading www.). --->
 	<cffunction name="extractHostFromUrl" access="private" returntype="string" output="false">
 		<cfargument name="urlText" type="string" required="true" />
-		<cfset u = trim( arguments.urlText ) />
-		<cfif NOT len( u )><cfreturn "" /></cfif>
-		<cfset h = reReplaceNoCase( u, "^[a-z]+://", "", "one" ) />
-		<cfset h = reReplace( h, "[/?##].*$", "", "one" ) />
-		<cfif find( "@", h ) GT 0><cfset h = listLast( h, "@" ) /></cfif>
-		<cfset h = listFirst( h, ":" ) />
-		<cfset h = lCase( trim( h ) ) />
-		<cfif left( h, 4 ) EQ "www."><cfset h = mid( h, 5, len( h ) ) /></cfif>
-		<cfreturn h />
+		<cfreturn variables.careerPageDiscoverer.extractHostFromUrl( arguments.urlText ) />
 	</cffunction>
 
 	<!--- True for hosts that are job boards / aggregators / social — not an employer's own site. --->
 	<cffunction name="isJobBoardOrSocialHost" access="private" returntype="boolean" output="false">
 		<cfargument name="host" type="string" required="true" />
-		<cfset h = lCase( trim( arguments.host ) ) />
-		<cfif NOT len( h )><cfreturn true /></cfif>
-		<cfset blocked = "linkedin.com,indeed.com,glassdoor.com,dice.com,ziprecruiter.com,monster.com,simplyhired.com,
-			careerbuilder.com,devjobsscanner.com,devitjobs.com,devitjobs.us,devitjobs.uk,wellfound.com,angel.co,
-			remoteok.com,remotive.com,weworkremotely.com,jobicy.com,arbeitnow.com,stackoverflow.com,
-			boards.greenhouse.io,job-boards.greenhouse.io,greenhouse.io,jobs.lever.co,lever.co,
-			myworkdayjobs.com,workday.com,smartrecruiters.com,ashbyhq.com,icims.com,jobvite.com,bamboohr.com,
-			taleo.net,brassring.com,successfactors.com,jobs.jobvite.com,naukri.com,foundit.in,monsterindia.com,
-			shine.com,instahyre.com,cutshort.io,weekday.works,jooble.org,adzuna.com,usajobs.gov,
-			facebook.com,twitter.com,x.com,reddit.com,youtube.com,medium.com,github.com,
-			google.com,bing.com,wikipedia.org,crunchbase.com,zoominfo.com,levels.fyi,
-			builtin.com,themuse.com,jobserve.com,cwjobs.co.uk,totaljobs.com,reed.co.uk,seek.com.au,
-			talent.com,jobstreet.com,glints.com,hired.com,toptal.com,arc.dev" />
-		<cfloop list="#blocked#" index="b" delimiters=",#chr(10)##chr(13)#">
-			<cfset bb = trim( b ) />
-			<cfif NOT len( bb )><cfcontinue /></cfif>
-			<cfif h EQ bb><cfreturn true /></cfif>
-			<cfif len( h ) GT len( bb ) AND right( h, len( bb ) + 1 ) EQ "." & bb><cfreturn true /></cfif>
-		</cfloop>
-		<cfreturn false />
+		<cfreturn variables.careerPageDiscoverer.isJobBoardOrSocialHost( arguments.host ) />
 	</cffunction>
 
 	<!--- Strip tags + decode the handful of HTML entities seen in listing titles/company names --->
@@ -2792,36 +2729,11 @@
 		<cfreturn s />
 	</cffunction>
 
+	<!--- Delegates to AtsDetector (PR 1.6). The previous inline findNoCase() OR-chain
+	     now lives declaratively in AtsRegistry; this shim preserves the call site. --->
 	<cffunction name="isProbableJobPostingUrl" access="private" returntype="boolean" output="false">
 		<cfargument name="jobUrl" type="string" required="true" />
 		<cfargument name="careersUrl" type="string" required="true" />
-		<cfif NOT len( trim( arguments.jobUrl ) )>
-			<cfreturn false />
-		</cfif>
-		<cfset u = lCase( trim( arguments.jobUrl ) ) />
-		<cfif findNoCase( "/job", u ) GT 0 OR findNoCase( "/jobs/", u ) GT 0 OR findNoCase( "/jobs/view/", u ) GT 0 OR findNoCase( "/jobs/search", u ) GT 0 OR findNoCase( "/job-search", u ) GT 0 OR findNoCase( "viewjob", u ) GT 0 OR findNoCase( "gh_jid", u ) GT 0 OR findNoCase( "?job=", u ) GT 0 OR findNoCase( "&job=", u ) GT 0 OR findNoCase( "requisition", u ) GT 0 OR findNoCase( "myworkdayjobs.com", u ) GT 0 OR findNoCase( "lever.co", u ) GT 0 OR findNoCase( "boards.greenhouse.io", u ) GT 0 OR findNoCase( "job-boards.greenhouse.io", u ) GT 0 OR findNoCase( "greenhouse.io/embed", u ) GT 0 OR findNoCase( "smartrecruiters.com", u ) GT 0 OR findNoCase( "ashbyhq.com", u ) GT 0 OR findNoCase( "icims.com", u ) GT 0 OR findNoCase( "taleo", u ) GT 0 OR findNoCase( "brassring", u ) GT 0 OR findNoCase( "successfactors", u ) GT 0 OR findNoCase( "jobvite.com", u ) GT 0 OR findNoCase( "bamboohr.com", u ) GT 0 OR findNoCase( "rippling.com", u ) GT 0 OR findNoCase( "darwinbox", u ) GT 0 OR findNoCase( "cutshort.io", u ) GT 0 OR findNoCase( "/position/", u ) GT 0 OR findNoCase( "/opening/", u ) GT 0 OR findNoCase( "/vacancy", u ) GT 0 OR findNoCase( "/opportunit", u ) GT 0 OR findNoCase( "/apply", u ) GT 0 OR findNoCase( "glassdoor.", u ) GT 0 OR findNoCase( "indeed.", u ) GT 0 OR findNoCase( "linkedin.com/jobs", u ) GT 0>
-			<cfreturn true />
-		</cfif>
-		<cfif NOT len( trim( arguments.careersUrl ) )>
-			<cfreturn false />
-		</cfif>
-		<cftry>
-			<cfset ju = createObject( "java", "java.net.URL" ).init( trim( arguments.jobUrl ) ) />
-			<cfset jc = createObject( "java", "java.net.URL" ).init( trim( arguments.careersUrl ) ) />
-			<cfcatch type="any">
-				<cfreturn false />
-			</cfcatch>
-		</cftry>
-		<cfif normalizeUrlForCompare( ju.toString() ) EQ normalizeUrlForCompare( jc.toString() )>
-			<cfreturn false />
-		</cfif>
-		<cfif ju.getHost() EQ jc.getHost()>
-			<cfset p = lCase( ju.getPath() ) />
-			<cfset pClean = reReplace( p, "^/+", "", "all" ) />
-			<cfif len( pClean ) AND listLen( pClean, "/" ) GTE 3 AND ( find( "career", pClean ) OR find( "job", pClean ) )>
-				<cfreturn true />
-			</cfif>
-		</cfif>
-		<cfreturn false />
+		<cfreturn variables.atsDetector.isProbableJobPostingUrl( arguments.jobUrl, arguments.careersUrl ) />
 	</cffunction>
 </cfcomponent>
