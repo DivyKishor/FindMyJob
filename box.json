@@ -1,0 +1,20 @@
+{
+    "name":"coldfusion-intelligence-engine",
+    "version":"0.1.0",
+    "slug":"cf-intelligence-engine",
+    "private":true,
+    "description":"Autonomous discovery system for ColdFusion-ecosystem jobs and companies.",
+    "dependencies":{},
+    "devDependencies":{
+        "testbox":"^5.4.0"
+    },
+    "installPaths":{
+        "testbox":"testbox/"
+    },
+    "testbox":{
+        "runner":"http://localhost:8599/tests/runner.cfm"
+    },
+    "scripts":{
+        "test":"testbox run runner=\"http://localhost:8599/tests/runner.cfm\" verbose=true"
+    }
+}
