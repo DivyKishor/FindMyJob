@@ -26,6 +26,26 @@
 				expect( variables.svc.normalizeUrl( "" ) ).toBe( "" );
 			});
 
+			it( "extracts a bare host from a URL", function(){
+				expect( variables.svc.hostOf( "https://www.acme.com/careers" ) ).toBe( "acme.com" );
+				expect( variables.svc.hostOf( "http://docs.foo.io:8080/x" ) ).toBe( "docs.foo.io" );
+			});
+
+			it( "flags doc/project/static-hosting hosts as non-employers", function(){
+				expect( variables.svc.isLikelyNonEmployerHost( "redux.js.org" ) ).toBeTrue();
+				expect( variables.svc.isLikelyNonEmployerHost( "docs.theframedrops.com" ) ).toBeTrue();
+				expect( variables.svc.isLikelyNonEmployerHost( "myproject.github.io" ) ).toBeTrue();
+				expect( variables.svc.isLikelyNonEmployerHost( "acme.com" ) ).toBeFalse();
+			});
+
+			it( "detects a careers / hiring signal in page markup", function(){
+				expect( variables.svc.careersSignalInHtml( "<a href='/careers'>Careers</a>" ) ).toBeTrue();
+				expect( variables.svc.careersSignalInHtml( "We're hiring engineers" ) ).toBeTrue();
+				expect( variables.svc.careersSignalInHtml( "<a href='https://boards.greenhouse.io/acme'>Jobs</a>" ) ).toBeTrue();
+				expect( variables.svc.careersSignalInHtml( "<h1>An open source UI library</h1>" ) ).toBeFalse();
+				expect( variables.svc.careersSignalInHtml( "" ) ).toBeFalse();
+			});
+
 		});
 		</cfscript>
 	</cffunction>

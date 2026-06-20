@@ -4,7 +4,7 @@
 	Mirrors Application.registerScheduledTasks(); use this to (re)register with a
 	custom base_url (e.g. your public host) or after changing the task key.
 
-	  CF_Observer_Daily_Scrape   runDailyScrape.cfm        daily 06:00  (watcher→discovery→scrape→score→alerts)
+	  CF_Observer_Daily_Scrape   runDailyScrape.cfm        every 12h 06:00+18:00 (watcher→discovery→scrape→score→alerts)
 	  CF_Observer_Fingerprint    fingerprintCompanies?max=75 daily 02:00 (rotates oldest first)
 	  CF_Observer_Company_Score  scoreCompanies.cfm       daily 02:45
 	  CF_Observer_Expiry_Check   checkJobExpiry?limit=60   every 3 days 03:15
@@ -22,7 +22,7 @@
 <cfset results = [] />
 
 <cfset jobs = [
-	{ name: "CF_Observer_Daily_Scrape",  path: "/tasks/runDailyScrape.cfm",                  time: "06:00 AM", interval: "daily" },
+	{ name: "CF_Observer_Daily_Scrape",  path: "/tasks/runDailyScrape.cfm",                  time: "06:00 AM", interval: "43200" },
 	{ name: "CF_Observer_Fingerprint",   path: "/tasks/fingerprintCompanies.cfm?max=75",     time: "02:00 AM", interval: "daily" },
 	{ name: "CF_Observer_Company_Score", path: "/tasks/scoreCompanies.cfm",                  time: "02:45 AM", interval: "daily" },
 	{ name: "CF_Observer_Expiry_Check",  path: "/tasks/checkJobExpiry.cfm?limit=60&min_days=7", time: "03:15 AM", interval: "259200" },
@@ -53,4 +53,4 @@
 </cfloop>
 
 <cfcontent type="application/json; charset=utf-8" />
-<cfoutput>#serializeJSON({ ok: true, keyEnabled: ( len( taskKey ) GT 0 ), tasks: results, note: "Registered in Lucee scheduler. View in Lucee Admin -> Scheduled Tasks." })#</cfoutput>
+<cfoutput>#serializeJSON({ ok: true, keyEnabled: ( len( taskKey ) GT 0 ), tasks: results, note: "Registered in Lucee scheduler. View in Lucee Admin -> Scheduled Tasks." })#</c

@@ -18,6 +18,7 @@
 	<cfproperty name="http" type="any" />
 	<cfproperty name="loggerService" type="any" />
 	<cfproperty name="graph" type="any" />
+	<cfproperty name="careers" type="any" />
 
 	<cffunction name="init" access="public" returntype="any" output="false">
 		<cfargument name="dataGateway"       type="any" required="true" />
@@ -25,10 +26,14 @@
 		<cfargument name="appConfig"         type="any" required="true" />
 		<cfargument name="loggerService"     type="any" required="false" default="" />
 		<cfargument name="graphService"      type="any" required="false" default="" />
+		<cfargument name="careerDiscoverer"  type="any" required="false" default="" /><!--- CareerPageDiscoverer: host classification --->
 		<cfset variables.gw = arguments.dataGateway />
 		<cfset variables.http = arguments.httpClientService />
 		<cfset variables.loggerService = arguments.loggerService />
 		<cfset variables.graph = arguments.graphService />
+		<cfset variables.careers = arguments.careerDiscoverer />
+		<cfset variables.requireCareersGate = true /><!--- only keep orgs whose site shows a careers/hiring signal --->
+		<cfset variables.gatedThisRun = 0 />
 		<cfset variables.token = trim( arguments.appConfig.secret( "github_token" ) ) />
 		<cfset variables.headers = {
 			"Accept": "application/vnd.github+json",
@@ -49,7 +54,10 @@
 	<cffunction name="harvestCompanies" access="public" returntype="struct" output="false">
 		<cfargument name="maxRepos" type="numeric" required="false" default="60" />
 		<cfargument name="maxUserExpansions" type="numeric" required="false" default="20" /><!--- limit org-affiliation lookups (API cost) --->
-		<cfset var summary = { reposScanned: 0, devsSeen: 0, companiesUpserted: 0, tokenUsed: isConfigured(), errors: [] } />
+		<cfargument name="requireCareers" type="boolean" required="false" default="true" /><!--- careers-gate: drop orgs with no hiring signal --->
+		<cfset variables.requireCareersGate = arguments.requireCareers />
+		<cfset variables.gatedThisRun = 0 />
+		<cfset var summary = { reposScanned: 0, devsSeen: 0, companiesUpserted: 0, companiesGated: 0, tokenUsed: isConfigured(), errors: [] } />
 		<cfset var seen = {} />
 		<cfset var userExpansions = 0 />
 		<cfset var langs = [ "ColdFusion", "CFML" ] />
@@ -91,9 +99,10 @@
 			</cfloop>
 		</cfloop>
 
+		<cfset summary.companiesGated = variables.gatedThisRun />
 		<cfset recordYield( "github:company_discovery", summary.reposScanned, summary.companiesUpserted ) />
 		<cfif isObject( variables.loggerService )>
-			<cfset variables.loggerService.info( "GitHub discovery: repos=#summary.reposScanned# devs=#summary.devsSeen# companies=#summary.companiesUpserted#" ) />
+			<cfset variables.loggerService.info( "GitHub discovery: repos=#summary.reposScanned# devs=#summary.devsSeen# companies=#summary.companiesUpserted# gated=#summary.companiesGated#" ) />
 		</cfif>
 		<cfreturn summary />
 	</cffunction>
@@ -159,6 +168,13 @@
 			[ { value: lCase( nm ), cfsqltype: "cf_sql_varchar" }, { value: lCase( site ), cfsqltype: "cf_sql_varchar" } ], 0 ) ) />
 		<cfif existing GT 0><cfreturn 0 /></cfif>
 
+		<!--- Careers-gate: only keep orgs whose site actually shows a hiring signal.
+		     Filters OSS projects / docs sites / ecosystem orgs that never hire. --->
+		<cfif variables.requireCareersGate AND NOT passesCareersGate( nm, site )>
+			<cfset variables.gatedThisRun = variables.gatedThisRun + 1 />
+			<cfreturn 0 />
+		</cfif>
+
 		<cfset variables.gw.execute(
 			"INSERT INTO companies (name, website, careers_url, careers_source, ats_config, created_at, updated_at)
 			 VALUES (?, ?, ?, 'career_page_scan', ?, " & variables.gw.nowExpr() & ", " & variables.gw.nowExpr() & ")",
@@ -214,5 +230,81 @@
 	<cffunction name="sleepMs" access="private" returntype="void" output="false">
 		<cfargument name="ms" type="numeric" required="true" />
 		<cftry><cfset sleep( arguments.ms ) /><cfcatch type="any"></cfcatch></cftry>
+	</cffunction>
+
+	<!--- ===== careers-gate (precision filter for GitHub-discovered orgs) ===== --->
+	<!--- True only if the candidate site looks like an employer that is hiring.
+	     Rejects doc/project hosts and job-board/social hosts cheaply, then fetches
+	     the homepage and requires a careers/hiring signal in the markup. --->
+	<cffunction name="passesCareersGate" access="private" returntype="boolean" output="false">
+		<cfargument name="name" type="string" required="true" />
+		<cfargument name="site" type="string" required="true" />
+		<cfset var host = hostOf( arguments.site ) />
+		<cfif NOT len( host )><cfreturn false /></cfif>
+		<cfif isLikelyNonEmployerHost( host )><cfreturn false /></cfif>
+		<cfif isObject( variables.careers ) AND variables.careers.isJobBoardOrSocialHost( host )><cfreturn false /></cfif>
+		<cfset var html = "" />
+		<cftry>
+			<cfset html = variables.http.getText( arguments.site, 12 ) />
+			<cfcatch type="any"><cfset html = "" /></cfcatch>
+		</cftry>
+		<cfif NOT len( html )><cfreturn false /></cfif>
+		<cfreturn careersSignalInHtml( html ) />
+	</cffunction>
+
+	<!--- Bare host (no scheme/path/port/www) from a URL. --->
+	<cffunction name="hostOf" access="public" returntype="string" output="false">
+		<cfargument name="urlText" type="string" required="true" />
+		<cfset var h = trim( arguments.urlText ) />
+		<cfif NOT len( h )><cfreturn "" /></cfif>
+		<cfset h = reReplaceNoCase( h, "^[a-z]+://", "", "one" ) />
+		<cfset h = reReplace( h, "[/?##].*$", "", "one" ) />
+		<cfset h = listFirst( h, ":" ) />
+		<cfset h = lCase( trim( h ) ) />
+		<cfif left( h, 4 ) EQ "www."><cfset h = mid( h, 5, len( h ) ) /></cfif>
+		<cfreturn h />
+	</cffunction>
+
+	<!--- Documentation / project / static-hosting hosts that never represent an employer. --->
+	<cffunction name="isLikelyNonEmployerHost" access="public" returntype="boolean" output="false">
+		<cfargument name="host" type="string" required="true" />
+		<cfset var h = lCase( trim( arguments.host ) ) />
+		<cfif NOT len( h )><cfreturn true /></cfif>
+		<cfif left( h, 5 ) EQ "docs." OR left( h, 5 ) EQ "blog." OR left( h, 4 ) EQ "wiki"><cfreturn true /></cfif>
+		<cfset var suffixes = "js.org,github.io,gitbook.io,readthedocs.io,readthedocs.org,netlify.app,vercel.app,pages.dev,gitlab.io,surge.sh,web.app,firebaseapp.com,herokuapp.com" />
+		<cfset var s = "" />
+		<cfloop list="#suffixes#" index="s">
+			<cfset s = trim( s ) />
+			<cfif len( h ) GTE len( s ) AND right( h, len( s ) + 1 ) EQ "." & s><cfreturn true /></cfif>
+			<cfif h EQ s><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
+	</cffunction>
+
+	<!--- True if the page markup carries a careers / hiring / ATS signal. --->
+	<cffunction name="careersSignalInHtml" access="public" returntype="boolean" output="false">
+		<cfargument name="html" type="string" required="true" />
+		<cfset var h = lCase( arguments.html ) />
+		<cfif NOT len( h )><cfreturn false /></cfif>
+		<!--- Phrase / path signals (careers nav, hiring copy, openings). --->
+		<cfset var phrases = [
+			"/careers", "/career", "career-opportunities", ">careers<", "careers</a", "we're hiring",
+			"we are hiring", "now hiring", "join our team", "join the team", "join us", "work with us",
+			"open positions", "open roles", "current openings", "job openings", "/jobs", "view jobs",
+			"our openings", "vacancies", "life at", "come work" ] />
+		<cfset var p = "" />
+		<cfloop array="#phrases#" index="p">
+			<cfif findNoCase( p, h ) GT 0><cfreturn true /></cfif>
+		</cfloop>
+		<!--- ATS host references embedded in links. --->
+		<cfset var atsHosts = [
+			"boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co", "myworkdayjobs.com",
+			"ashbyhq.com", "smartrecruiters.com", "bamboohr.com", "jobvite.com", "icims.com",
+			"workable.com", "recruitee.com", "teamtailor.com", "breezy.hr", "applytojob.com", "workday.com" ] />
+		<cfset var a = "" />
+		<cfloop array="#atsHosts#" index="a">
+			<cfif findNoCase( a, h ) GT 0><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
 	</cffunction>
 </cfcomponent>
