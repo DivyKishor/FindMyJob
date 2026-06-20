@@ -5,9 +5,20 @@
     "dialect": "sqlite"
   },
 
+  "security": {
+    "_comment": "When set, every /tasks/*.cfm requires ?key=<task_key>. Leave blank to keep tasks open (local dev). Set via CFINTEL_SECURITY_TASK_KEY in production.",
+    "task_key": ""
+  },
+
   "alerts": {
     "min_score": 70,
-    "channels": ["log"]
+    "channels": ["log"],
+    "telegram_min_score": 70,
+    "whatsapp_min_score": 80
+  },
+
+  "whatsapp": {
+    "api_version": "v20.0"
   },
 
   "secrets": {
@@ -18,9 +29,11 @@
     "usajobs_user_agent": "",
     "google_cse_api_key": "",
     "google_cse_cx": "",
+    "github_token": "",
     "telegram_bot_token": "",
     "telegram_chat_id": "",
     "whatsapp_token": "",
-    "whatsapp_phone_number_id": ""
+    "whatsapp_phone_number_id": "",
+    "whatsapp_recipient": ""
   }
 }
