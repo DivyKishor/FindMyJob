@@ -1660,36 +1660,57 @@
 					<cfcontinue />
 				</cfcatch>
 			</cftry>
-			<cfset titles = reMatchNoCase( "base-search-card__title[^>]*>[^<]+<", htmlPage ) />
-			<cfset links = reMatchNoCase( "https://[a-z]+\.linkedin\.com/jobs/view/[^""\?\s]+", htmlPage ) />
-			<cfset locations = reMatchNoCase( "job-search-card__location[^>]*>[^<]+<", htmlPage ) />
-			<cfif NOT isArray( titles )><cfset titles = [] /></cfif>
-			<cfif NOT isArray( links )><cfset links = [] /></cfif>
-			<cfif NOT isArray( locations )><cfset locations = [] /></cfif>
-			<cfset uniqueLinks = [] />
-			<cfloop array="#links#" index="rawLink">
-				<cfset cleanLink = trim( rawLink ) />
-				<cfif NOT structKeyExists( seenLinks, cleanLink )>
-					<cfset seenLinks[ cleanLink ] = true />
-					<cfset arrayAppend( uniqueLinks, cleanLink ) />
-				</cfif>
+			<!--- Collect every job-view link with its byte position in the page. --->
+			<cfset linkHits = [] />
+			<cfset scanPos = 1 />
+			<cfloop condition="true">
+				<cfset lm = reFindNoCase( "https://[a-z]+\.linkedin\.com/jobs/view/[^""'\?\s<]+", htmlPage, scanPos, true ) />
+				<cfif NOT isArray( lm.pos ) OR lm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset arrayAppend( linkHits, { pos: lm.pos[1], url: mid( htmlPage, lm.pos[1], lm.len[1] ) } ) />
+				<cfset scanPos = lm.pos[1] + lm.len[1] />
 			</cfloop>
-			<cfloop from="1" to="#arrayLen( titles )#" index="idx">
-				<cfset rawTitle = trim( titles[ idx ] ) />
-				<cfset rawTitle = reReplace( rawTitle, "^[^>]+>", "", "all" ) />
-				<cfset rawTitle = reReplace( rawTitle, "<$", "", "all" ) />
-				<cfset rawTitle = trim( rawTitle ) />
+
+			<!--- Walk each card title and pair it with the job link from its OWN card.
+			     LinkedIn lays each card out as <a full-link href=JOB> ... <h3 title>, so the
+			     correct link is the nearest /jobs/view/ link occurring BEFORE the title.
+			     This replaces the old "zip two page-wide arrays by index" logic, which drifted
+			     out of alignment (promoted/extra anchors) and stapled a CF title onto an
+			     unrelated posting's URL. --->
+			<cfset titlePos = 1 />
+			<cfloop condition="true">
+				<cfset tm = reFindNoCase( "base-search-card__title[^>]*>[^<]+<", htmlPage, titlePos, true ) />
+				<cfif NOT isArray( tm.pos ) OR tm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset tStart = tm.pos[1] />
+				<cfset titlePos = tStart + tm.len[1] />
+				<cfset rawTitle = mid( htmlPage, tStart, tm.len[1] ) />
+				<cfset rawTitle = trim( reReplace( reReplace( rawTitle, "^[^>]+>", "", "all" ), "<$", "", "all" ) ) />
 				<cfif NOT len( rawTitle )><cfcontinue /></cfif>
+
+				<!--- nearest job link before this title = the same card's full-link anchor --->
 				<cfset jobLink = "" />
-				<cfif idx LTE arrayLen( uniqueLinks )><cfset jobLink = uniqueLinks[ idx ] /></cfif>
+				<cfset li = 0 />
+				<cfloop from="#arrayLen( linkHits )#" to="1" index="li" step="-1">
+					<cfif linkHits[ li ].pos LT tStart>
+						<cfset jobLink = linkHits[ li ].url />
+						<cfbreak />
+					</cfif>
+				</cfloop>
 				<cfif NOT len( jobLink )><cfcontinue /></cfif>
+				<cfif structKeyExists( seenLinks, jobLink )><cfcontinue /></cfif>
+				<cfset seenLinks[ jobLink ] = true />
+
+				<!--- location: first location marker at/after the title --->
 				<cfset loc = "" />
-				<cfif idx LTE arrayLen( locations )>
-					<cfset loc = trim( locations[ idx ] ) />
-					<cfset loc = reReplace( loc, "^[^>]+>", "", "all" ) />
-					<cfset loc = reReplace( loc, "<$", "", "all" ) />
-					<cfset loc = trim( loc ) />
+				<cfset locM = reFindNoCase( "job-search-card__location[^>]*>[^<]+<", htmlPage, tStart, true ) />
+				<cfif isArray( locM.pos ) AND locM.pos[1] GT 0>
+					<cfset loc = mid( htmlPage, locM.pos[1], locM.len[1] ) />
+					<cfset loc = trim( reReplace( reReplace( loc, "^[^>]+>", "", "all" ), "<$", "", "all" ) ) />
 				</cfif>
+
+				<!--- Backstop: the public scrape has no job body, so this is a title-only match.
+				     Require the link slug to corroborate ColdFusion; otherwise skip. Catches any
+				     residual title/link mismatch (e.g. a CF title pointing at a cloud-infra URL). --->
+				<cfif NOT linkSlugLooksCF( jobLink )><cfcontinue /></cfif>
 				<cfif NOT variables.scoringService.shouldPersistJob( rawTitle, "" )><cfcontinue /></cfif>
 				<cfset companyId = variables.companyService.getOrCreateExternalCompany( "LinkedIn", "" ) />
 				<cfset externalId = "linkedin-" & hash( lCase( jobLink ) ) />
@@ -1702,6 +1723,19 @@
 			<cfset variables.loggerService.info( "LinkedIn public ingest: upserted #n# job(s)." ) />
 		</cfif>
 		<cfreturn n />
+	</cffunction>
+
+	<!--- LinkedIn job-view slugs are derived from the posting title, so a CF role reads like
+	     /jobs/view/coldfusion-developer-... — require that signal when we have no job body. --->
+	<cffunction name="linkSlugLooksCF" access="private" returntype="boolean" output="false">
+		<cfargument name="link" type="string" required="true" />
+		<cfset var s = lCase( arguments.link ) />
+		<cfset var tokens = [ "coldfusion", "cold-fusion", "cfml", "lucee", "coldbox", "fusebox", "wirebox", "commandbox", "adobe-cf", "/cf-" ] />
+		<cfset var t = "" />
+		<cfloop array="#tokens#" index="t">
+			<cfif findNoCase( t, s ) GT 0><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
 	</cffunction>
 
 	<!--- Foundit.in (formerly Monster India) listing scan --->
