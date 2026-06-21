@@ -188,7 +188,8 @@
 
 		<!--- Lean, cost-tuned cadence (staggered off-peak so a small box never runs two heavy jobs at once). --->
 		<cfset var jobs = [
-			{ name: "CF_Observer_Daily_Scrape",   path: "/tasks/runDailyScrape.cfm",            time: "06:00 AM", interval: "43200" },
+			{ name: "CF_Observer_Daily_Scrape",   path: "/tasks/runDailyScrape.cfm",            time: "06:00 AM", interval: "daily" },
+			{ name: "CF_Observer_Evening_Scrape", path: "/tasks/runDailyScrape.cfm",            time: "06:00 PM", interval: "daily" },
 			{ name: "CF_Observer_Fingerprint",    path: "/tasks/fingerprintCompanies.cfm?max=75", time: "02:00 AM", interval: "daily" },
 			{ name: "CF_Observer_Company_Score",  path: "/tasks/scoreCompanies.cfm",            time: "02:45 AM", interval: "daily" },
 			{ name: "CF_Observer_Expiry_Check",   path: "/tasks/checkJobExpiry.cfm?limit=60&min_days=7", time: "03:15 AM", interval: "259200" },
@@ -241,4 +242,3 @@
 		</cfif>
 	</cffunction>
 </cfcomponent>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
