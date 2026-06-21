@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies (TestBox)
         run: box install
 
+      - name: Download runtime dependencies (SQLite JDBC driver)
+        run: bash scripts/install-deps.sh
+
       - name: Start CI server (Lucee 6)
         run: box server start serverConfigFile=server-ci.json
 
