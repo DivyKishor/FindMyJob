@@ -42,6 +42,14 @@
 		that need schema tables should call it themselves or guard with a try/catch.
 	--->
 	<cffunction name="onApplicationStart" access="public" returntype="boolean" output="false">
+		<!--- Only wire DB-backed services when the fixture datasource is actually registered
+		     (i.e. the SQLite JDBC jar is present). Without this guard a missing driver makes
+		     onApplicationStart throw, which 500s the runner and fails the ENTIRE suite — even
+		     the pure-logic specs that need no database. DB-integration specs guard themselves. --->
+		<cfif NOT structKeyExists( this.datasources, "cfintel_test" )>
+			<cfreturn true />
+		</cfif>
+
 		<cfset application.datasource = "cfintel_test" />
 
 		<cfset application.databaseService = createObject( "component", "services.DatabaseService" ).init(
