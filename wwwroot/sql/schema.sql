@@ -75,3 +75,29 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_run_at ON pipeline_runs(run_at);
+
+-- Discovery source run tracking (quota enforcement)
+CREATE TABLE IF NOT EXISTS source_run_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_key TEXT NOT NULL,
+  run_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_run_log_key_time ON source_run_log(source_key, run_at);
+
+-- Discovery V1: raw evidence signals from Bing RSS / ecosystem queries
+CREATE TABLE IF NOT EXISTS discovery_signals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  signal_type TEXT NOT NULL,
+  source_name TEXT NOT NULL,
+  query_text TEXT NOT NULL,
+  company_name TEXT,
+  company_domain TEXT,
+  target_url TEXT,
+  evidence_text TEXT,
+  confidence_score INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_discovery_signals_domain ON discovery_signals(company_domain);
+CREATE INDEX IF NOT EXISTS idx_discovery_signals_time ON discovery_signals(created_at);

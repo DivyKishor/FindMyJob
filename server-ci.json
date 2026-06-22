@@ -1,0 +1,12 @@
+{
+    "name":"cfintel-ci",
+    "web":{
+        "webroot":".",
+        "http":{
+            "port":8599
+        }
+    },
+    "app":{
+        "cfengine":"lucee@6"
+    }
+}

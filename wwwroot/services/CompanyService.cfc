@@ -549,8 +549,8 @@
 			     OR careers_url IS NULL OR trim(careers_url) = ''
 			   )
 			 ORDER BY updated_at ASC, id ASC
-			 LIMIT #int( lim )#",
-			{},
+			 LIMIT ?",
+			[ { value: int( lim ), cfsqltype: "cf_sql_integer" } ],
 			{ datasource: ds() }
 		) />
 	</cffunction>

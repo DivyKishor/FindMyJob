@@ -7,8 +7,10 @@
 <cfparam name="url.company_id" default="0" />
 <cfparam name="url.jobs_page" default="1" />
 <cfparam name="url.jobs_page_size" default="25" />
-<cfparam name="url.jobs_sort_by" default="fetched_at" />
+<cfparam name="url.jobs_sort_by" default="score" />
 <cfparam name="url.jobs_sort_dir" default="desc" />
+<cfparam name="url.new_since" default="24" />
+<cfparam name="url.work_type" default="" />
 <cfparam name="url.alerts_page" default="1" />
 <cfparam name="url.alerts_page_size" default="25" />
 <cfparam name="url.alerts_sort_by" default="sent_at" />
@@ -27,6 +29,10 @@
 <cfset jobsPageSize = val( url.jobs_page_size ) />
 <cfset jobsSortBy = lCase( url.jobs_sort_by ) />
 <cfset jobsSortDir = lCase( url.jobs_sort_dir ) />
+<cfset newSince = val( url.new_since ) />
+<cfif NOT listFind( "6,24,48,168", newSince )><cfset newSince = 24 /></cfif>
+<cfset workTypeFilter = lCase( trim( url.work_type ) ) />
+<cfif NOT listFind( ",remote,hybrid,onsite,unknown", workTypeFilter )><cfset workTypeFilter = "" /></cfif>
 <cfset alertsPage = val( url.alerts_page ) />
 <cfset alertsPageSize = val( url.alerts_page_size ) />
 <cfset alertsSortBy = lCase( url.alerts_sort_by ) />
@@ -54,22 +60,34 @@
 	<cfset companiesData = application.companyService.listPaged( companiesSortBy, companiesSortDir, companiesPage, companiesPageSize ) />
 	<cfset companies = companiesData.rows />
 	<cfset companiesForFilter = application.companyService.listWithJobsForFilter() />
-	<cfset jobsData = application.jobService.listPaged( companyId, keyword, minScore, jobsPage, jobsPageSize, jobsSortBy, jobsSortDir, locationKeyword, rawSourceFilter ) />
+	<cfset jobsData = application.jobService.listPaged( companyId, keyword, minScore, jobsPage, jobsPageSize, jobsSortBy, jobsSortDir, locationKeyword, rawSourceFilter, workTypeFilter ) />
 	<cfset alertsData = application.alertService.listAlertsPaged( alertsPage, alertsPageSize, alertsSortBy, alertsSortDir ) />
 	<cfset runInfo = application.runStatusService.getLatestRun() />
 	<cfset pipelinePhases = application.runStatusService.getPipelinePhaseRows( runInfo ) />
 	<cfset totalCompanies = companiesData.totalRows />
 	<cfset totalJobs = jobsData.totalRows />
 	<cfset totalJobsInDb = application.jobService.countAll() />
-	<cfset filtersActive = len( keyword ) OR len( locationKeyword ) OR minScore GT 0 OR len( rawSourceFilter ) OR companyId GT 0 />
+	<cfset filtersActive = len( keyword ) OR len( locationKeyword ) OR minScore GT 0 OR len( rawSourceFilter ) OR companyId GT 0 OR len( workTypeFilter ) />
 	<cfset totalAlerts = alertsData.totalRows />
 	<cfset scrapeCompaniesProcessed = application.runStatusService.getPipelineMetric( runInfo, "scrape", "companiesProcessed", 0 ) />
 	<cfset companyLinksEnriched = application.runStatusService.getPipelineMetric( runInfo, "scrape", "companyLinksEnriched", 0 ) />
+	<cfset newJobsCount = application.jobService.countNew( 24 ) />
+	<cfset briefingData = application.jobService.listPaged( 0, "", 0, 1, 7, "score", "desc" ) />
+	<cfset eligibleData = application.jobService.listPaged( 0, "", 70, 1, 1, "score", "desc" ) />
+	<cfset eligibleCount = eligibleData.totalRows />
+	<cfset sourceHealthStruct = application.runStatusService.getPipelineMetric( runInfo, "scrape", "sourceHealth", {} ) />
+	<cfset sourceNames = [] />
+	<cfif isStruct( sourceHealthStruct )>
+		<cfloop collection="#sourceHealthStruct#" item="srcKey">
+			<cfset arrayAppend( sourceNames, srcKey ) />
+		</cfloop>
+	</cfif>
+	<cfset liveSourcesCount = arrayLen( sourceNames ) />
 	<cfcatch type="any">
 		<cfset companiesData = { rows: [], totalRows: 0, page: 1, pageSize: 25, totalPages: 1, sortBy: "job_count", sortDir: "desc" } />
 		<cfset companies = [] />
 		<cfset companiesForFilter = [] />
-		<cfset jobsData = { rows: [], totalRows: 0, page: 1, pageSize: 25, totalPages: 1, sortBy: "fetched_at", sortDir: "desc" } />
+		<cfset jobsData = { rows: [], totalRows: 0, page: 1, pageSize: 25, totalPages: 1, sortBy: "score", sortDir: "desc" } />
 		<cfset alertsData = { rows: [], totalRows: 0, page: 1, pageSize: 25, totalPages: 1, sortBy: "sent_at", sortDir: "desc" } />
 		<cfset totalCompanies = 0 />
 		<cfset totalJobs = 0 />
@@ -78,392 +96,439 @@
 		<cfset totalAlerts = 0 />
 		<cfset scrapeCompaniesProcessed = 0 />
 		<cfset companyLinksEnriched = 0 />
+		<cfset newJobsCount = 0 />
+		<cfset briefingData = { rows: [] } />
+		<cfset eligibleCount = 0 />
+		<cfset sourceNames = [] />
+		<cfset liveSourcesCount = 0 />
 		<cfset pageError = cfcatch.message />
 	</cfcatch>
 </cftry>
 
-<cfset filterCoreNoLocation = "keyword=#urlEncodedFormat( keyword )#&min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#&companies_page_size=#companiesData.pageSize#" />
-<cfset filterLocation = "location=#urlEncodedFormat( locationKeyword )#" />
-<cfset filterCore = "#filterCoreNoLocation#&#filterLocation#" />
-<cfset filterJobsSort = "jobs_sort_by=#urlEncodedFormat( jobsData.sortBy )#&jobs_sort_dir=#urlEncodedFormat( jobsData.sortDir )#" />
-<cfset filterAlertsSort = "alerts_sort_by=#urlEncodedFormat( alertsData.sortBy )#&alerts_sort_dir=#urlEncodedFormat( alertsData.sortDir )#" />
-<cfset filterCompaniesSort = "companies_sort_by=#urlEncodedFormat( companiesData.sortBy )#&companies_sort_dir=#urlEncodedFormat( companiesData.sortDir )#" />
-<cfset baseFilter = "#filterCore#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#&companies_page=#companiesData.page#" />
-<cfset baseFilterNoLocation = "#filterCoreNoLocation#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#&companies_page=#companiesData.page#" />
-<cfset filterCoreNoKeyword = "min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&jobs_page_size=#jobsData.pageSize#&alerts_page_size=#alertsData.pageSize#&companies_page_size=#companiesData.pageSize#" />
-<cfset baseFilterNoKeyword = "#filterCoreNoKeyword#&#filterLocation#&#filterJobsSort#&#filterAlertsSort#&#filterCompaniesSort#&companies_page=#companiesData.page#" />
-<cfset jobsAnchorQuery = baseFilter & "&jobs_page=1&alerts_page=" & val( alertsData.page ) & "##jobs" />
-<cfset healthAnchorQuery = baseFilter & "&jobs_page=" & val( jobsData.page ) & "&alerts_page=" & val( alertsData.page ) & "##pipeline" />
-<cfset companiesAnchorQuery = baseFilter & "&jobs_page=" & val( jobsData.page ) & "&alerts_page=" & val( alertsData.page ) & "##companies" />
-
-<cfset activeSection = "overview" />
-<cfset pageTitle = "CF/OBSERVER | Dashboard" />
+<cfset activeSection = "today" />
+<cfset unreadAlerts = 0 />
+<cfset pageTitle = "CF/OBSERVER | Today" />
 <cfset searchKeyword = keyword />
+<cfset bodyClass = "fp-root" />
+
+<!--- ===================== helpers ===================== --->
+
+<cffunction name="relAge" access="public" returntype="string" output="false">
+	<cfargument name="ts" type="string" required="true" />
+	<cfif NOT len( trim( arguments.ts ) ) ><cfreturn "" /></cfif>
+	<cftry>
+		<cfset var dt = parseDateTime( arguments.ts ) />
+		<cfcatch type="any"><cfreturn "" /></cfcatch>
+	</cftry>
+	<cfset var mins = dateDiff( "n", dt, now() ) />
+	<cfif mins LT 1><cfreturn "just now" /></cfif>
+	<cfif mins LT 60><cfreturn mins & "m ago" /></cfif>
+	<cfset var hrs = dateDiff( "h", dt, now() ) />
+	<cfif hrs LT 24><cfreturn hrs & "h ago" /></cfif>
+	<cfset var days = dateDiff( "d", dt, now() ) />
+	<cfreturn days & "d ago" />
+</cffunction>
+
+<cffunction name="plainSummary" access="public" returntype="string" output="false">
+	<cfargument name="html" type="string" required="true" />
+	<cfargument name="maxLen" type="numeric" required="false" default="150" />
+	<cfif NOT len( trim( arguments.html ) ) ><cfreturn "" /></cfif>
+	<cfset var out = reReplace( arguments.html, "(?si)<script[^>]*>.*?</script>", " ", "all" ) />
+	<cfset out = trim( reReplace( reReplace( out, "<[^>]+>", " ", "all" ), "\s+", " ", "all" ) ) />
+	<cfif len( out ) GT arguments.maxLen><cfset out = left( out, arguments.maxLen ) & "…" /></cfif>
+	<cfreturn out />
+</cffunction>
+
+<cffunction name="scoreToneClass" access="public" returntype="string" output="false">
+	<cfargument name="score" type="numeric" required="true" />
+	<cfif arguments.score GTE 90><cfreturn "fp-badge--top" /></cfif>
+	<cfif arguments.score GTE 70><cfreturn "fp-badge--good" /></cfif>
+	<cfif arguments.score GTE 50><cfreturn "fp-badge--mid" /></cfif>
+	<cfreturn "fp-badge--low" />
+</cffunction>
+
+<cffunction name="jobHref" access="public" returntype="string" output="false">
+	<cfargument name="link" type="string" required="true" />
+	<cfset var href = trim( arguments.link ) />
+	<cfif NOT len( href ) ><cfreturn "" /></cfif>
+	<cfif left( href, 2 ) EQ "//"><cfreturn "https:" & href /></cfif>
+	<cfif reFindNoCase( "^https?://", href ) EQ 0><cfreturn "https://" & href /></cfif>
+	<cfreturn href />
+</cffunction>
+
+<!--- Build a Board URL with the given filter state, anchored to #board. --->
+<cffunction name="boardUrl" access="public" returntype="string" output="false">
+	<cfargument name="base" type="string" required="true" />
+	<cfargument name="kw" type="string" required="true" />
+	<cfargument name="loc" type="string" required="true" />
+	<cfargument name="ms" type="numeric" required="true" />
+	<cfargument name="src" type="string" required="true" />
+	<cfargument name="cid" type="numeric" required="true" />
+	<cfargument name="wt" type="string" required="true" />
+	<cfargument name="sb" type="string" required="true" />
+	<cfargument name="sd" type="string" required="true" />
+	<cfreturn arguments.base & "?keyword=" & urlEncodedFormat( arguments.kw ) & "&location=" & urlEncodedFormat( arguments.loc )
+		& "&min_score=" & arguments.ms & "&source=" & urlEncodedFormat( arguments.src ) & "&company_id=" & arguments.cid
+		& "&work_type=" & urlEncodedFormat( arguments.wt ) & "&jobs_sort_by=" & urlEncodedFormat( arguments.sb )
+		& "&jobs_sort_dir=" & urlEncodedFormat( arguments.sd ) & "&jobs_page=1##board" />
+</cffunction>
+
+<!--- Renders a single job card (Briefing + Board use this). --->
+<cffunction name="renderJobCard" access="public" returntype="string" output="false">
+	<cfargument name="job" type="struct" required="true" />
+	<cfargument name="big" type="boolean" required="false" default="false" />
+	<cfset var j = arguments.job />
+	<cfset var score = val( j.score ) />
+	<cfset var work = structKeyExists( j, "work_type" ) ? lCase( j.work_type ) : "unknown" />
+	<cfset var workLabel = work EQ "unknown" ? "unclassified" : work />
+	<cfset var href = jobHref( j.link ) />
+	<cfset var summary = structKeyExists( j, "description" ) ? plainSummary( j.description, 150 ) : "" />
+	<cfset var ageStr = structKeyExists( j, "fetched_at" ) ? relAge( j.fetched_at ) : "" />
+	<cfset var loc = len( trim( j.location ) ) ? j.location : "Location n/a" />
+	<cfset var badgePx = arguments.big ? 60 : 50 />
+	<cfset var expired = structKeyExists( j, "is_active" ) AND NOT val( j.is_active ) />
+	<cfsavecontent variable="out">
+	<cfoutput>
+	<a class="fp-card fp-click fp-job-card<cfif arguments.big> fp-job-card--big</cfif>" style="text-decoration:none;color:inherit;"<cfif len( href )> href="#encodeForHTMLAttribute( href )#" target="_blank" rel="noopener noreferrer"<cfelse> href="##" onclick="return false;"</cfif>>
+		<div class="fp-job-card-top">
+			<span class="fp-kick fp-work-pill<cfif work EQ 'remote'> fp-work-pill--remote</cfif>">#encodeForHTML( workLabel )#</span>
+			<div class="fp-badge #scoreToneClass( score )#" style="width:#badgePx#px;height:#badgePx#px;">
+				<span class="fp-badge-num" style="font-size:#( arguments.big ? 22 : 18 )#px;">#score#</span>
+				<span class="fp-badge-lbl" style="font-size:#( arguments.big ? 8 : 7 )#px;">MATCH</span>
+			</div>
+		</div>
+		<h3 class="fp-disp">#encodeForHTML( j.title )#</h3>
+		<cfif arguments.big AND len( summary )><p class="fp-summary">#encodeForHTML( summary )#</p></cfif>
+		<div class="fp-job-card-bottom">
+			<div style="min-width:0;">
+				<div class="fp-job-card-company">#encodeForHTML( j.company_name )#</div>
+				<div class="fp-job-card-meta">#encodeForHTML( loc )#<cfif len( ageStr )> &middot; #ageStr#</cfif><cfif expired> &middot; expired</cfif></div>
+			</div>
+			<button type="button" class="fp-reset fp-save fp-save-toggle" data-job-id="#val( j.id )#" title="Save role" onclick="event.preventDefault();event.stopPropagation();">
+				<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--fp-ink)" stroke-width="2.2" stroke-linejoin="round"><path d="M12 21s-7.5-4.9-10-9.3C.6 9 1.7 5.6 5 4.7c2-.5 3.9.4 5 2 1.1-1.6 3-2.5 5-2 3.3.9 4.4 4.3 3 7C19.5 16.1 12 21 12 21z"/></svg>
+			</button>
+		</div>
+	</a>
+	</cfoutput>
+	</cfsavecontent>
+	<cfreturn out />
+</cffunction>
 
 <cfinclude template="includes/layoutHead.cfm" />
-<cfinclude template="includes/layoutSidebar.cfm" />
-
-<main class="flex-1 flex flex-col min-w-0 bg-background relative overflow-hidden">
 <cfinclude template="includes/layoutTopbar.cfm" />
 
 <cfoutput>
-<div class="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-margin-desktop py-6 md:py-8 flex flex-col gap-8">
 
 <cfif len( pageError )>
-<div class="bento-card p-4 border-l-4 border-l-red-400 text-red-300 text-sm">#encodeForHTML( pageError )#</div>
+<div class="fp-wrap" style="padding-top:20px;">
+	<div class="fp-card" style="padding:16px 20px;border-color:var(--fp-accent2);color:var(--fp-accent2);font-size:13px;">#encodeForHTML( pageError )#</div>
+</div>
 </cfif>
 
-<!--- USP strip --->
-<section class="bento-card p-5 md:p-6">
-<h2 class="text-primary text-xs font-bold uppercase tracking-[0.2em] mb-3">ColdFusion job intelligence</h2>
-<p class="text-outline text-sm mb-4 max-w-4xl">One dashboard for <strong class="text-on-surface">ColdFusion, CFML, Lucee</strong> and full-stack CF-backend roles — scored for India eligibility and global remote.</p>
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-<div class="flex gap-2"><span class="material-symbols-outlined text-primary text-[18px]">hub</span><span><strong class="text-on-surface">20+ sources</strong><br/><span class="text-outline text-xs">Watcher, Adzuna, DevJobsScanner, boards, career scans</span></span></div>
-<div class="flex gap-2"><span class="material-symbols-outlined text-primary text-[18px]">grade</span><span><strong class="text-on-surface">India-first scoring</strong><br/><span class="text-outline text-xs">v3 score 0–100; 70+ = India-eligible / global remote</span></span></div>
-<div class="flex gap-2"><span class="material-symbols-outlined text-primary text-[18px]">layers</span><span><strong class="text-on-surface">Full-stack CF</strong><br/><span class="text-outline text-xs">Captures CFML/Lucee backend roles, not title-only noise</span></span></div>
-<div class="flex gap-2"><span class="material-symbols-outlined text-primary text-[18px]">sync</span><span><strong class="text-on-surface">Daily pipeline</strong><br/><span class="text-outline text-xs">Ingest, dedupe, score, and alert automatically</span></span></div>
-</div>
-<button type="button" id="scoring-toggle" class="mt-4 text-primary text-xs font-semibold flex items-center gap-1 hover:underline">
-<span class="material-symbols-outlined text-[14px]">info</span> How scoring works
-</button>
-<div id="scoring-panel" class="hidden mt-3 text-xs text-outline leading-relaxed border-t border-outline-variant/20 pt-3">
-<strong class="text-on-surface">100</strong> = CF keyword + India or confirmed global remote.
-<strong class="text-on-surface">80</strong> = CF + likely remote-friendly.
-<strong class="text-on-surface">50</strong> = CF match, location unclear.
-<strong class="text-on-surface">20</strong> = US work-auth / clearance signals.
-Use <a class="text-primary" href="#indexUrl#?#baseFilterNoLocation#&min_score=70&location=&jobs_page=1">India-eligible (70+)</a> quick filter.
-</div>
-</section>
-
-<!--- Bento stats --->
-<section class="grid grid-cols-1 md:grid-cols-12 gap-6">
-<div class="bento-card md:col-span-6 p-6 flex flex-col justify-between">
-<div>
-<h3 class="text-outline text-xs uppercase tracking-wider mb-1">Jobs matching filters</h3>
-<div class="flex items-baseline gap-3">
-<span class="text-[40px] text-on-surface numerical font-bold">#numberFormat( totalJobs, "," )#</span>
-<cfif filtersActive OR totalJobs NEQ totalJobsInDb>
-<span class="text-primary font-label-mono text-sm numerical">#numberFormat( totalJobsInDb, "," )# total indexed</span>
-</cfif>
-</div>
-</div>
-<div class="mt-4 text-outline-variant text-[11px] font-label-mono border-t border-outline-variant/10 pt-4 numerical">
-<cfif structIsEmpty( runInfo )>NO PIPELINE RUN YET<cfelse>LAST SYNC: #encodeForHTML( runInfo.run_at )#</cfif>
-</div>
-</div>
-<div class="bento-card md:col-span-3 p-6 flex flex-col justify-between">
-<div>
-<h3 class="text-outline text-xs uppercase tracking-wider mb-1">Tracked sources</h3>
-<div class="flex items-center gap-3">
-<span class="text-3xl text-on-surface numerical font-bold">#numberFormat( totalCompanies, "," )#</span>
-<cfif NOT structIsEmpty( runInfo ) AND lCase( runInfo.status ) EQ "success">
-<div class="h-3 w-3 rounded-full bg-primary glow-blue-pulse"></div>
-</cfif>
-</div>
-</div>
-<p class="text-outline text-xs mt-2 numerical">Companies in watch list</p>
-</div>
-<div class="bento-card md:col-span-3 p-6 flex flex-col justify-between">
-<div>
-<h3 class="text-outline text-xs uppercase tracking-wider mb-1">Alerts &amp; scrape</h3>
-<div class="font-label-mono text-2xl text-on-surface numerical">#numberFormat( totalAlerts, "," )# <span class="text-outline text-sm">alerts</span></div>
-</div>
-<p class="text-outline text-xs mt-2 numerical">Last scrape: #val( scrapeCompaniesProcessed )# cos. | #val( companyLinksEnriched )# links enriched</p>
-</div>
-</section>
-
-<!--- Pipeline health --->
-<section id="pipeline" class="flex flex-col gap-4">
-<div class="flex justify-between items-center flex-wrap gap-2">
-<h2 class="font-headline-md text-lg text-on-surface tracking-tight">Pipeline Health</h2>
-<a class="text-primary text-xs font-semibold flex items-center gap-1 hover:underline" href="#appBasePath#tasks/runDailyScrape.cfm">
-VIEW RUN OUTPUT <span class="material-symbols-outlined text-[14px]">arrow_forward</span>
-</a>
-</div>
-<div class="bento-card overflow-hidden">
-<table class="w-full text-left border-collapse">
-<thead>
-<tr class="bg-surface-container-low/50 text-outline text-[11px] uppercase tracking-widest border-b border-outline-variant/20">
-<th class="px-6 py-3 font-medium">Pipeline phase</th>
-<th class="px-6 py-3 font-medium">Last sync</th>
-<th class="px-6 py-3 font-medium">Status</th>
-<th class="px-6 py-3 font-medium">Volume</th>
-</tr>
-</thead>
-<tbody class="text-sm font-label-mono divide-y divide-outline-variant/10">
-<cfif arrayLen( pipelinePhases ) EQ 0>
-<tr><td colspan="4" class="px-6 py-4 text-outline">No pipeline runs recorded yet. Use <strong>Run Daily Pipeline</strong> in the sidebar.</td></tr>
-<cfelse>
-<cfloop array="#pipelinePhases#" index="phaseRow">
-<cfset statusClass = "status-success" />
-<cfif phaseRow.status EQ "WARN"><cfset statusClass = "status-warn" /></cfif>
-<cfif phaseRow.status EQ "FAILED"><cfset statusClass = "status-failed" /></cfif>
-<tr class="hover:bg-surface-container-high/30 transition-colors">
-<td class="px-6 py-4 text-on-surface">#encodeForHTML( phaseRow.label )#</td>
-<td class="px-6 py-4 text-outline-variant numerical">#encodeForHTML( left( phaseRow.lastSync, 19 ) )#</td>
-<td class="px-6 py-4">
-<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold #statusClass#">
-<span class="h-1 w-1 rounded-full bg-current"></span> #encodeForHTML( phaseRow.status )#
-</span>
-</td>
-<td class="px-6 py-4 text-outline numerical">#numberFormat( val( phaseRow.volume ), "," )#</td>
-</tr>
+<!--- ===================== Briefing (Today) ===================== --->
+<cfset topJob = arrayLen( briefingData.rows ) ? briefingData.rows[ 1 ] : {} />
+<cfset boardGrid = [] />
+<cfloop from="2" to="#arrayLen( briefingData.rows )#" index="bgIdx">
+	<cfset arrayAppend( boardGrid, briefingData.rows[ bgIdx ] ) />
 </cfloop>
-</cfif>
-</tbody>
-</table>
-</div>
+
+<section class="fp-hero">
+	<div class="fp-wrap fp-hero-inner">
+		<div class="fp-hero-top">
+			<div class="fp-hero-head">
+				<div class="fp-kick fp-hero-kick">The daily ColdFusion frontpage &middot; #dateFormat( now(), 'd mmm yyyy' )#</div>
+				<h1 class="fp-disp">#newJobsCount# fresh<br/>CF roles<br/><span class="fp-accent">worth a look<span class="fp-accent2">.</span></span></h1>
+				<p class="fp-hero-sub">Scored across #liveSourcesCount# source<cfif liveSourcesCount NEQ 1>s</cfif>, filtered to the #eligibleCount# that are India-eligible or genuinely remote. No title-only noise.</p>
+			</div>
+			<div class="fp-seal-wrap">
+				<svg class="fp-seal" viewBox="0 0 132 132" width="132" height="132">
+					<defs><path id="fpcircle" d="M66,66 m-50,0 a50,50 0 1,1 100,0 a50,50 0 1,1 -100,0" /></defs>
+					<text fill="var(--fp-accent)" style="font-size:11px;font-weight:700;letter-spacing:3px;font-family:Archivo,sans-serif;">
+						<textPath href="##fpcircle">INDIA-ELIGIBLE &middot; GLOBAL REMOTE &middot; CFML &middot; LUCEE &middot; </textPath>
+					</text>
+				</svg>
+				<div class="fp-seal-center"><span class="fp-disp" style="font-size:22px;">NEW</span></div>
+			</div>
+		</div>
+
+		<cfif NOT structIsEmpty( topJob )>
+		<cfset topHref = jobHref( topJob.link ) />
+		<a class="fp-card fp-click fp-top-match" style="text-decoration:none;"<cfif len( topHref )> href="#encodeForHTMLAttribute( topHref )#" target="_blank" rel="noopener noreferrer"<cfelse> href="##" onclick="return false;"</cfif>>
+			<div class="fp-badge fp-badge--ondark #scoreToneClass( val( topJob.score ) )#" style="width:78px;height:78px;">
+				<span class="fp-badge-num" style="font-size:28px;">#val( topJob.score )#</span>
+				<span class="fp-badge-lbl" style="font-size:10px;">MATCH</span>
+			</div>
+			<div class="fp-top-match-body">
+				<div class="fp-kick fp-top-match-kick">Top match today</div>
+				<div class="fp-disp fp-top-match-title">#encodeForHTML( topJob.title )#</div>
+				<div class="fp-top-match-meta">#encodeForHTML( topJob.company_name )#<cfif len( trim( topJob.location ) )> &middot; #encodeForHTML( topJob.location )#</cfif></div>
+			</div>
+			<cfif len( topHref )>
+			<span class="fp-btn fp-btn--accent">Apply now &rarr;</span>
+			<cfelse>
+			<span class="fp-btn" aria-disabled="true">No link yet</span>
+			</cfif>
+		</a>
+		</cfif>
+	</div>
 </section>
 
-<!--- Filters --->
-<form method="get" action="#indexUrl#" id="filters" class="flex flex-wrap items-center gap-3 bg-surface-container-lowest border border-outline-variant/20 p-3 rounded-lg">
-<input type="hidden" name="jobs_sort_by" value="#encodeForHTMLAttribute( jobsData.sortBy )#"/>
-<input type="hidden" name="jobs_sort_dir" value="#encodeForHTMLAttribute( jobsData.sortDir )#"/>
-<input type="hidden" name="alerts_sort_by" value="#encodeForHTMLAttribute( alertsData.sortBy )#"/>
-<input type="hidden" name="alerts_sort_dir" value="#encodeForHTMLAttribute( alertsData.sortDir )#"/>
-<input type="hidden" name="companies_sort_by" value="#encodeForHTMLAttribute( companiesData.sortBy )#"/>
-<input type="hidden" name="companies_sort_dir" value="#encodeForHTMLAttribute( companiesData.sortDir )#"/>
-<div class="flex items-center gap-2 px-2 border-r border-outline-variant/20">
-<span class="material-symbols-outlined text-[18px] text-outline">filter_list</span>
-<span class="text-[11px] font-bold uppercase text-outline">Filters</span>
-</div>
-<input class="bg-transparent border border-outline-variant/30 rounded px-3 py-1.5 text-sm text-on-surface min-w-[120px]" type="text" name="keyword" value="#encodeForHTMLAttribute( keyword )#" placeholder="Keyword"/>
-<input class="bg-transparent border border-outline-variant/30 rounded px-3 py-1.5 text-sm text-on-surface min-w-[120px]" type="text" name="location" value="#encodeForHTMLAttribute( locationKeyword )#" placeholder="Location"/>
-<input class="bg-transparent border border-outline-variant/30 rounded px-3 py-1.5 text-sm text-on-surface w-20 numerical" type="number" name="min_score" value="#minScore#" min="0" max="100" title="Min score"/>
-<select class="bg-surface-container-lowest border border-outline-variant/30 rounded px-2 py-1.5 text-sm text-on-surface max-w-[180px]" name="company_id">
-<option value="0">All companies</option>
-<cfloop array="#companiesForFilter#" index="coFilter">
-<option value="#coFilter.id#"<cfif companyId EQ val( coFilter.id )> selected</cfif>>#encodeForHTML( coFilter.name )# (#val( coFilter.job_count )#)</option>
-</cfloop>
-</select>
-<input type="hidden" name="source" value="#encodeForHTMLAttribute( rawSourceFilter )#"/>
-<button type="submit" class="bg-primary/20 text-primary px-4 py-1.5 rounded text-sm font-semibold hover:bg-primary/30">Apply</button>
-<div class="ml-auto flex items-center gap-3">
-<span class="text-xs text-outline">India-eligible (70+)</span>
-<button type="button" id="toggle-india-eligible" class="w-8 h-4 rounded-full relative transition-colors #minScore GTE 70 ? 'bg-primary/30' : 'bg-outline-variant/30'#" aria-checked="#minScore GTE 70 ? 'true' : 'false'#" data-on-url="#indexUrl#?#baseFilterNoLocation#&min_score=70&location=&jobs_page=1" data-off-url="#indexUrl#?#baseFilterNoLocation#&min_score=0&location=&jobs_page=1">
-<div class="absolute top-0.5 w-3 h-3 bg-primary rounded-full transition-all #minScore GTE 70 ? 'translate-x-4' : 'translate-x-0.5'#" style="left:0"></div>
-</button>
-</div>
-</form>
-
-<div class="flex flex-wrap gap-2 text-xs">
-<a class="px-2 py-1 rounded bg-primary/10 text-primary" href="#indexUrl#?#baseFilterNoLocation#&min_score=70&location=&jobs_page=1">India-eligible</a>
-<a class="px-2 py-1 rounded border border-outline-variant/30 text-outline hover:text-primary" href="#indexUrl#?#baseFilterNoLocation#&location=#urlEncodedFormat( 'India' )#&jobs_page=1">India</a>
-<a class="px-2 py-1 rounded border border-outline-variant/30 text-outline hover:text-primary" href="#indexUrl#?#baseFilterNoLocation#&location=#urlEncodedFormat( 'remote' )#&jobs_page=1">Remote</a>
-<a class="px-2 py-1 rounded border border-outline-variant/30 text-outline hover:text-primary" href="#indexUrl#?keyword=&location=&min_score=0&source=#urlEncodedFormat( 'cf_global_watcher' )#&company_id=0&jobs_page=1">Global CF</a>
-<a class="px-2 py-1 rounded border border-outline-variant/30 text-outline hover:text-primary" href="#indexUrl#?keyword=&location=&min_score=0&source=&company_id=0&jobs_page=1">Clear all</a>
-</div>
-
-<cfif totalJobs EQ 0 AND totalJobsInDb GT 0>
-<div class="bento-card p-4 border-l-4 border-l-tertiary text-sm text-outline">
-<strong class="text-on-surface">#totalJobsInDb# job(s)</strong> in the database do not match current filters.
-<a class="text-primary" href="#indexUrl#?keyword=&location=&min_score=0&source=&company_id=0&jobs_page=1">Clear filters</a>
-</div>
-</cfif>
-
-<!--- Master-detail job feed --->
-<section id="jobs" class="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[480px]">
-<div class="lg:col-span-5 flex flex-col gap-3 max-h-[700px] overflow-y-auto custom-scrollbar pr-1">
-<div class="flex justify-between items-center mb-1">
-<span class="text-sm text-outline">Job feed</span>
-<span class="text-xs text-outline numerical">Page #jobsData.page# / #jobsData.totalPages#</span>
-</div>
-<cfif arrayLen( jobsData.rows ) EQ 0>
-<div class="bento-card p-6 text-outline text-sm">No jobs match current filters.</div>
-<cfelse>
-<cfset firstJob = jobsData.rows[ 1 ] />
-<cfset firstDesc = "" />
-<cfif structKeyExists( firstJob, "description" ) AND len( trim( firstJob.description ) )>
-<cfset firstDesc = trim( reReplace( reReplace( reReplace( firstJob.description, "(?si)<script[^>]*>.*?</script>", " ", "all" ), "<[^>]+>", " ", "all" ), "\s+", " ", "all" ) ) />
-</cfif>
-<cfset firstHref = structKeyExists( firstJob, "link" ) ? trim( firstJob.link ) : "" />
-<cfif len( firstHref ) AND reFindNoCase( "^https?://", firstHref ) EQ 0><cfset firstHref = "https://" & firstHref /></cfif>
-<cfset firstScore = val( firstJob.score ) />
-<cfset firstInsight = "Score " & firstScore & "/100." />
-<cfif firstScore GTE 70>
-<cfset firstInsight = firstInsight & " India-eligible or global-remote signals detected." />
-<cfelseif firstScore GTE 50>
-<cfset firstInsight = firstInsight & " CF match; verify location eligibility." />
-</cfif>
-<cfloop from="1" to="#arrayLen( jobsData.rows )#" index="jobIdx">
-<cfset jobRow = jobsData.rows[ jobIdx ] />
-<cfset descPlain = "" />
-<cfif structKeyExists( jobRow, "description" ) AND len( trim( jobRow.description ) )>
-<cfset descPlain = reReplace( jobRow.description, "(?si)<script[^>]*>.*?</script>", " ", "all" ) />
-<cfset descPlain = trim( reReplace( reReplace( descPlain, "<[^>]+>", " ", "all" ), "\s+", " ", "all" ) ) />
-</cfif>
-<cfset jobHref = "" />
-<cfif structKeyExists( jobRow, "link" )><cfset jobHref = trim( jobRow.link ) /></cfif>
-<cfif len( jobHref )>
-<cfif reFindNoCase( "^https?://", jobHref ) EQ 0 AND reFindNoCase( "^//", jobHref ) EQ 0><cfset jobHref = "https://" & jobHref /></cfif>
-<cfif left( jobHref, 2 ) EQ "//"><cfset jobHref = "https:" & jobHref /></cfif>
-</cfif>
-<cfset jobScore = val( jobRow.score ) />
-<cfset radialOffset = 251.2 * ( 1 - ( jobScore / 100 ) ) />
-<cfset stackText = lCase( jobRow.title & " " & descPlain ) />
-<cfset cardActive = jobIdx EQ 1 ? " active" : "" />
-<cfset metaLine = encodeForHTMLAttribute( jobRow.company_name ) & " | " & encodeForHTMLAttribute( len( trim( jobRow.location ) ) ? jobRow.location : "Location n/a" ) />
-<cfif structKeyExists( jobRow, "raw_source" ) AND len( trim( jobRow.raw_source ) )><cfset metaLine = metaLine & " | " & encodeForHTMLAttribute( jobRow.raw_source ) /></cfif>
-<cfset insightText = "Score " & jobScore & "/100." />
-<cfif jobScore GTE 70>
-<cfset insightText = insightText & " India-eligible or global-remote signals detected." />
-<cfelseif jobScore GTE 50>
-<cfset insightText = insightText & " CF match; verify location eligibility." />
-</cfif>
-<div class="bento-card p-4 border-l-4 border-l-transparent job-card#cardActive# cursor-pointer" data-job-id="#jobRow.id#" data-title="#encodeForHTMLAttribute( jobRow.title )#" data-meta="#metaLine#" data-description="#encodeForHTMLAttribute( left( descPlain, 4000 ) )#" data-insight="#encodeForHTMLAttribute( insightText )#" data-link="#encodeForHTMLAttribute( jobHref )#" data-score="#jobScore#">
-<div class="flex justify-between items-start mb-2 gap-2">
-<div class="min-w-0">
-<h4 class="text-on-surface font-semibold leading-tight truncate">#encodeForHTML( jobRow.title )#</h4>
-<p class="text-outline text-sm truncate">#encodeForHTML( jobRow.company_name )#<cfif len( trim( jobRow.location ) )> &bull; #encodeForHTML( jobRow.location )#</cfif></p>
-</div>
-<div class="relative h-12 w-12 flex-shrink-0 flex items-center justify-center">
-<svg class="radial-progress-svg absolute h-full w-full" viewBox="0 0 100 100">
-<circle class="radial-progress-bg" cx="50" cy="50" r="40" stroke-width="8"></circle>
-<circle class="radial-progress-val" cx="50" cy="50" r="40" stroke="url(##scoreGrad)" stroke-dasharray="251.2" stroke-dashoffset="#radialOffset#" stroke-width="8"></circle>
-</svg>
-<span class="font-label-mono text-[11px] font-bold text-primary numerical">#jobScore#</span>
-</div>
-</div>
-<div class="flex flex-wrap gap-2 mt-2">
-<cfif findNoCase( "coldfusion", stackText ) OR findNoCase( "cfml", stackText )><span class="text-[10px] font-label-mono px-2 py-0.5 bg-surface-container-highest text-outline">CFML</span></cfif>
-<cfif findNoCase( "lucee", stackText )><span class="text-[10px] font-label-mono px-2 py-0.5 bg-surface-container-highest text-outline">LUCEE</span></cfif>
-<cfif findNoCase( "full stack", stackText ) OR findNoCase( "fullstack", stackText )><span class="text-[10px] font-label-mono px-2 py-0.5 bg-surface-container-highest text-outline">FULL STACK</span></cfif>
-<cfif findNoCase( "remote", stackText )><span class="text-[10px] font-label-mono px-2 py-0.5 bg-surface-container-highest text-outline">REMOTE</span></cfif>
-</div>
-</div>
-</cfloop>
-</cfif>
-<div class="flex justify-between pt-2">
-<cfif jobsData.page GT 1><a class="text-sm text-primary" href="#indexUrl#?#baseFilter#&jobs_page=#jobsData.page-1#&alerts_page=#alertsData.page#&companies_page=#companiesData.page#">Previous</a><cfelse><span></span></cfif>
-<cfif jobsData.page LT jobsData.totalPages><a class="text-sm text-primary" href="#indexUrl#?#baseFilter#&jobs_page=#jobsData.page+1#&alerts_page=#alertsData.page#&companies_page=#companiesData.page#">Next</a></cfif>
-</div>
-</div>
-
-<div class="lg:col-span-7 bento-card flex flex-col min-h-[480px]" id="detail-pane">
-<header class="p-6 md:p-8 border-b border-outline-variant/20 flex flex-col sm:flex-row justify-between items-start gap-4 bg-surface-container-lowest/30">
-<div class="min-w-0">
-<span class="text-primary text-[10px] font-bold uppercase tracking-[0.2em] block mb-2">NOW VIEWING</span>
-<h2 class="text-xl md:text-2xl text-on-surface font-bold" id="detail-title"><cfif arrayLen( jobsData.rows )>#encodeForHTML( jobsData.rows[1].title )#<cfelse>Select a job</cfif></h2>
-<p class="text-outline text-sm mt-1" id="detail-meta"><cfif arrayLen( jobsData.rows )>#encodeForHTML( jobsData.rows[1].company_name )#<cfelse>No job selected</cfif></p>
-</div>
-<a id="detail-apply" class="bg-primary-container text-on-primary-container font-bold px-6 py-3 rounded-lg hover:brightness-110 transition-all flex items-center gap-2 whitespace-nowrap<cfif arrayLen( jobsData.rows ) EQ 0 OR NOT len( firstHref )> opacity-50 pointer-events-none</cfif>" href="<cfif arrayLen( jobsData.rows ) AND len( firstHref )>#encodeForHTMLAttribute( firstHref )#<cfelse>##</cfif>" target="_blank" rel="noopener noreferrer">
-APPLY NOW <span class="material-symbols-outlined">bolt</span>
-</a>
-</header>
-<div class="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1 space-y-6">
-<section>
-<h3 class="text-on-surface font-semibold mb-3">Job Description</h3>
-<p class="text-outline text-sm leading-relaxed" id="detail-description"><cfif arrayLen( jobsData.rows ) AND len( firstDesc )>#encodeForHTML( left( firstDesc, 2000 ) )#<cfelse>No description available.</cfif></p>
+<cfif arrayLen( boardGrid )>
+<section class="fp-wrap" style="padding:30px 28px 16px;">
+	<div class="fp-section-head">
+		<span class="fp-disp" style="font-size:22px;">More on the board</span>
+		<span class="fp-section-rule"></span>
+		<a class="fp-reset fp-kick fp-link" style="color:var(--fp-mute);white-space:nowrap;" href="##board">See all &rarr;</a>
+	</div>
+	<div class="fp-grid-3">
+	<cfloop from="1" to="#arrayLen( boardGrid )#" index="bgIdx">
+		#renderJobCard( boardGrid[ bgIdx ], bgIdx EQ 1 )#
+	</cfloop>
+	</div>
 </section>
-<div class="p-5 bg-surface-container-low rounded-lg border border-primary/20">
-<h4 class="text-primary font-bold mb-2 flex items-center gap-2 text-sm">
-<span class="material-symbols-outlined text-[20px]">psychology</span> Scoring insight
-</h4>
-<p class="text-sm text-outline" id="detail-insight"><cfif arrayLen( jobsData.rows )>#encodeForHTML( firstInsight )#<cfelse>Run the daily pipeline to score jobs.</cfif></p>
-</div>
-</div>
-</div>
+</cfif>
+
+<!--- by the numbers --->
+<section class="fp-wrap" style="padding:24px 28px 12px;">
+	<div class="fp-stats-strip">
+		<div class="fp-stat-cell">
+			<div class="fp-stat-val">#numberFormat( totalJobsInDb, ',' )#</div>
+			<div class="fp-kick fp-stat-lbl">Indexed</div>
+		</div>
+		<div class="fp-stat-cell fp-stat-cell--accent">
+			<div class="fp-stat-val">+#numberFormat( newJobsCount, ',' )#</div>
+			<div class="fp-kick fp-stat-lbl">New today</div>
+		</div>
+		<div class="fp-stat-cell">
+			<div class="fp-stat-val">#numberFormat( eligibleCount, ',' )#</div>
+			<div class="fp-kick fp-stat-lbl">Eligible 70+</div>
+		</div>
+		<div class="fp-stat-cell">
+			<div class="fp-stat-val">#numberFormat( liveSourcesCount, ',' )#</div>
+			<div class="fp-kick fp-stat-lbl">Live sources</div>
+		</div>
+	</div>
 </section>
 
-<!--- Companies --->
-<section id="companies" class="flex flex-col gap-4">
-<div class="flex justify-between items-center">
-<h2 class="text-lg text-on-surface font-semibold">Companies</h2>
-<span class="text-xs text-outline numerical">Page #companiesData.page# / #companiesData.totalPages#</span>
-</div>
-<div class="bento-card overflow-x-auto">
-<table class="w-full text-left border-collapse min-w-[640px]">
-<thead>
-<tr class="bg-surface-container-low/50 text-outline text-[11px] uppercase tracking-widest border-b border-outline-variant/20">
-<th class="px-4 py-3">Name</th>
-<th class="px-4 py-3">Source</th>
-<th class="px-4 py-3">Score</th>
-<th class="px-4 py-3">Jobs</th>
-<th class="px-4 py-3">Links</th>
-</tr>
-</thead>
-<tbody class="text-sm divide-y divide-outline-variant/10">
-<cfif arrayLen( companies ) EQ 0>
-<tr><td colspan="5" class="px-4 py-4 text-outline">No companies found.</td></tr>
-<cfelse>
-<cfloop array="#companies#" index="companyRow">
-<cfset coWeb = trim( companyRow.website ) />
-<cfif len( coWeb ) AND reFindNoCase( "^https?://", coWeb ) EQ 0><cfset coWeb = "https://" & coWeb /></cfif>
-<cfset coCareer = trim( companyRow.careers_url ) />
-<cfif len( coCareer ) AND reFindNoCase( "^https?://", coCareer ) EQ 0><cfset coCareer = "https://" & coCareer /></cfif>
-<tr class="hover:bg-surface-container-high/30">
-<td class="px-4 py-3 text-on-surface">#encodeForHTML( companyRow.name )#</td>
-<td class="px-4 py-3 text-outline text-xs">#encodeForHTML( companyRow.careers_source )#</td>
-<td class="px-4 py-3 numerical">#val( companyRow.score )#</td>
-<td class="px-4 py-3 numerical">#val( companyRow.job_count )#</td>
-<td class="px-4 py-3 text-xs">
-<cfif len( coWeb )><a class="text-primary" href="#encodeForHTMLAttribute( coWeb )#" target="_blank" rel="noopener">site</a></cfif>
-<cfif len( coCareer )> <a class="text-primary" href="#encodeForHTMLAttribute( coCareer )#" target="_blank" rel="noopener">careers</a></cfif>
-</td>
-</tr>
-</cfloop>
-</cfif>
-</tbody>
-</table>
-</div>
-<div class="flex justify-between text-sm">
-<cfif companiesData.page GT 1><a class="text-primary" href="#indexUrl#?#baseFilter#&companies_page=#companiesData.page-1#&jobs_page=#jobsData.page#&alerts_page=#alertsData.page#">Previous</a><cfelse><span></span></cfif>
-<cfif companiesData.page LT companiesData.totalPages><a class="text-primary" href="#indexUrl#?#baseFilter#&companies_page=#companiesData.page+1#&jobs_page=#jobsData.page#&alerts_page=#alertsData.page#">Next</a></cfif>
-</div>
+<!--- sources strip --->
+<cfif arrayLen( sourceNames )>
+<section class="fp-wrap" style="padding:20px 28px 48px;">
+	<div class="fp-kick" style="color:var(--fp-mute);margin-bottom:12px;">Reading from #liveSourcesCount# source<cfif liveSourcesCount NEQ 1>s</cfif></div>
+	<div class="fp-sources-strip">
+	<cfloop array="#sourceNames#" index="srcName">
+		<span class="fp-kick fp-source-chip">#encodeForHTML( srcName )#</span>
+	</cfloop>
+	</div>
 </section>
-
-<!--- Alerts --->
-<section id="alerts" class="flex flex-col gap-4 pb-8">
-<div class="flex justify-between items-center">
-<h2 class="text-lg text-on-surface font-semibold">Alerts</h2>
-<span class="text-xs text-outline numerical">Page #alertsData.page# / #alertsData.totalPages#</span>
-</div>
-<div class="bento-card overflow-x-auto">
-<table class="w-full text-left border-collapse min-w-[560px]">
-<thead>
-<tr class="bg-surface-container-low/50 text-outline text-[11px] uppercase tracking-widest border-b border-outline-variant/20">
-<th class="px-4 py-3">Sent</th>
-<th class="px-4 py-3">Channel</th>
-<th class="px-4 py-3">Company</th>
-<th class="px-4 py-3">Title</th>
-<th class="px-4 py-3">Score</th>
-</tr>
-</thead>
-<tbody class="text-sm divide-y divide-outline-variant/10">
-<cfif arrayLen( alertsData.rows ) EQ 0>
-<tr><td colspan="5" class="px-4 py-4 text-outline">No alerts yet. Run daily pipeline first.</td></tr>
-<cfelse>
-<cfloop array="#alertsData.rows#" index="alertRow">
-<cfset payload = structKeyExists( alertRow, "payload" ) ? alertRow.payload : {} />
-<tr class="hover:bg-surface-container-high/30">
-<td class="px-4 py-3 text-outline text-xs numerical">#encodeForHTML( alertRow.sent_at )#</td>
-<td class="px-4 py-3">#encodeForHTML( alertRow.channel )#</td>
-<td class="px-4 py-3">#encodeForHTML( structKeyExists( payload, "company_name" ) ? payload.company_name : "" )#</td>
-<td class="px-4 py-3">#encodeForHTML( structKeyExists( payload, "title" ) ? payload.title : "" )#</td>
-<td class="px-4 py-3 numerical">#structKeyExists( payload, "score" ) ? val( payload.score ) : ""#</td>
-</tr>
-</cfloop>
 </cfif>
-</tbody>
-</table>
-</div>
-<div class="flex justify-between text-sm">
-<cfif alertsData.page GT 1><a class="text-primary" href="#indexUrl#?#baseFilter#&alerts_page=#alertsData.page-1#&jobs_page=#jobsData.page#&companies_page=#companiesData.page#">Previous</a><cfelse><span></span></cfif>
-<cfif alertsData.page LT alertsData.totalPages><a class="text-primary" href="#indexUrl#?#baseFilter#&alerts_page=#alertsData.page+1#&jobs_page=#jobsData.page#&companies_page=#companiesData.page#">Next</a></cfif>
-</div>
-</section>
 
+<!--- ===================== Board ===================== --->
+<cfset eligibleOn = ( minScore GTE 70 AND lCase( trim( locationKeyword ) ) EQ "india-eligible" ) />
+<cfset activeCompanyName = "" />
+<cfif companyId GT 0>
+	<cfloop array="#companiesForFilter#" index="coF">
+		<cfif val( coF.id ) EQ companyId><cfset activeCompanyName = coF.name /></cfif>
+	</cfloop>
+</cfif>
+
+<div id="board" style="position:relative;top:-64px;"></div>
+<div class="fp-filterbar">
+	<div class="fp-wrap fp-filterbar-row">
+		<a class="fp-chip<cfif NOT len( workTypeFilter )> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, '', jobsData.sortBy, jobsData.sortDir )#">All</a>
+		<a class="fp-chip<cfif workTypeFilter EQ 'remote'> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, 'remote', jobsData.sortBy, jobsData.sortDir )#">Remote</a>
+		<a class="fp-chip<cfif workTypeFilter EQ 'hybrid'> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, 'hybrid', jobsData.sortBy, jobsData.sortDir )#">Hybrid</a>
+		<a class="fp-chip<cfif workTypeFilter EQ 'onsite'> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, 'onsite', jobsData.sortBy, jobsData.sortDir )#">Onsite</a>
+
+		<span class="fp-filterbar-divider"></span>
+
+		<a class="fp-chip<cfif minScore EQ 0> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, 0, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">Any score</a>
+		<a class="fp-chip<cfif minScore EQ 70> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, 70, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">70+</a>
+		<a class="fp-chip<cfif minScore EQ 85> fp-chip--on</cfif>" href="#boardUrl( indexUrl, keyword, locationKeyword, 85, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">85+</a>
+
+		<cfif eligibleOn>
+		<a class="fp-chip fp-chip--on" href="#boardUrl( indexUrl, keyword, '', 0, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">India-eligible &##10003;</a>
+		<cfelse>
+		<a class="fp-chip" href="#boardUrl( indexUrl, keyword, 'india-eligible', 70, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">India-eligible &##10003;</a>
+		</cfif>
+
+		<div class="fp-filterbar-spacer"></div>
+		<span class="fp-kick" style="color:var(--fp-mute);">#numberFormat( jobsData.totalRows, ',' )# of #numberFormat( totalJobsInDb, ',' )#</span>
+		<select class="fp-in" style="width:auto;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:11px;" onchange="location.href=this.value;">
+			<option value="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, 'score', 'desc' )#"<cfif jobsData.sortBy EQ 'score'> selected</cfif>>Sort: match score</option>
+			<option value="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, 'fetched_at', 'desc' )#"<cfif jobsData.sortBy EQ 'fetched_at'> selected</cfif>>Sort: newest</option>
+		</select>
+	</div>
 </div>
+
+<div class="fp-wrap" style="padding:26px 28px 56px;">
+	<cfif companyId GT 0 AND len( activeCompanyName )>
+	<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+		<span class="fp-kick" style="color:var(--fp-mute);">Filtered to</span>
+		<a class="fp-chip fp-chip--on" style="text-decoration:none;" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, 0, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">#encodeForHTML( activeCompanyName )# &##10005;</a>
+	</div>
+	</cfif>
+
+	<cfif arrayLen( jobsData.rows ) EQ 0>
+	<div class="fp-card fp-empty">
+		<div class="fp-empty-icon">
+			<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--fp-ink)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+		</div>
+		<h3 class="fp-disp">No roles match those filters</h3>
+		<p>Loosen the score or work-type filters, or clear your search.</p>
+		<a class="fp-btn fp-btn--accent" style="margin-top:6px;" href="#indexUrl#?keyword=&location=&min_score=0&source=&company_id=0&work_type=&jobs_page=1##board">Reset filters</a>
+	</div>
+	<cfelse>
+	<div class="fp-grid-3">
+	<cfloop from="1" to="#arrayLen( jobsData.rows )#" index="jobIdx">
+		#renderJobCard( jobsData.rows[ jobIdx ], ( jobIdx - 1 ) MOD 7 EQ 0 )#
+	</cfloop>
+	</div>
+	<div style="display:flex;justify-content:space-between;margin-top:24px;">
+		<cfif jobsData.page GT 1>
+		<a class="fp-btn fp-btn--ghost fp-btn--sm" href="#indexUrl#?#boardUrl( '', keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#&jobs_page=#jobsData.page-1###board">&larr; Previous</a>
+		<cfelse><span></span></cfif>
+		<span class="fp-kick" style="color:var(--fp-mute);align-self:center;">Page #jobsData.page# / #jobsData.totalPages#</span>
+		<cfif jobsData.page LT jobsData.totalPages>
+		<a class="fp-btn fp-btn--ghost fp-btn--sm" href="#indexUrl#?#boardUrl( '', keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#&jobs_page=#jobsData.page+1###board">Next &rarr;</a>
+		<cfelse><span></span></cfif>
+	</div>
+	</cfif>
+</div>
+
+<!--- ===================== Companies ===================== --->
+<div id="companies" style="position:relative;top:-64px;"></div>
+<div class="fp-wrap fp-page">
+	<div style="margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;">
+		<div>
+			<h1 class="fp-disp fp-page-title">Companies hiring CF</h1>
+			<div class="fp-kick fp-page-sub">#numberFormat( totalCompanies, ',' )# employers &middot; page #companiesData.page# / #companiesData.totalPages#</div>
+		</div>
+	</div>
+	<cfif arrayLen( companies ) EQ 0>
+	<div class="fp-card" style="padding:24px;color:var(--fp-mute);font-size:13.5px;">No companies found.</div>
+	<cfelse>
+	<div class="fp-grid-3">
+	<cfloop array="#companies#" index="companyRow">
+		<cfset coWeb = trim( companyRow.website ) />
+		<cfif len( coWeb ) AND reFindNoCase( "^https?://", coWeb ) EQ 0><cfset coWeb = "https://" & coWeb /></cfif>
+		<cfset coCareer = trim( companyRow.careers_url ) />
+		<cfif len( coCareer ) AND reFindNoCase( "^https?://", coCareer ) EQ 0><cfset coCareer = "https://" & coCareer /></cfif>
+		<cfset coInitial = len( trim( companyRow.name ) ) ? uCase( left( trim( companyRow.name ), 1 ) ) : "?" />
+		<a class="fp-card fp-click" style="padding:22px;display:flex;flex-direction:column;gap:14px;height:100%;text-decoration:none;color:inherit;" href="#boardUrl( indexUrl, '', '', 0, '', val( companyRow.id ), '', 'score', 'desc' )#">
+			<div style="display:flex;justify-content:space-between;align-items:flex-start;">
+				<div class="fp-disp" style="width:46px;height:46px;border:2px solid var(--fp-ink);border-radius:50%;display:flex;align-items:center;justify-content:center;">#encodeForHTML( coInitial )#</div>
+				<div class="fp-badge #scoreToneClass( val( companyRow.score ) )#" style="width:46px;height:46px;">
+					<span class="fp-badge-num" style="font-size:16px;">#val( companyRow.score )#</span>
+				</div>
+			</div>
+			<div>
+				<h3 class="fp-disp" style="font-size:22px;margin:0;">#encodeForHTML( companyRow.name )#</h3>
+				<div style="font-size:12.5px;color:var(--fp-mute);margin-top:4px;">#encodeForHTML( len( trim( companyRow.careers_source ) ) ? companyRow.careers_source : "unknown source" )#</div>
+			</div>
+			<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:6px;">
+				<span class="fp-kick">#val( companyRow.job_count )# open #( val( companyRow.job_count ) EQ 1 ? "role" : "roles" )#</span>
+				<span class="fp-kick fp-link" style="color:var(--fp-mute);">View &rarr;</span>
+			</div>
+		</a>
+	</cfloop>
+	</div>
+	<div style="display:flex;justify-content:space-between;margin-top:24px;">
+		<cfif companiesData.page GT 1>
+		<a class="fp-btn fp-btn--ghost fp-btn--sm" href="#indexUrl#?keyword=#urlEncodedFormat( keyword )#&location=#urlEncodedFormat( locationKeyword )#&min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&work_type=#urlEncodedFormat( workTypeFilter )#&jobs_sort_by=#urlEncodedFormat( jobsData.sortBy )#&jobs_sort_dir=#urlEncodedFormat( jobsData.sortDir )#&companies_page=#companiesData.page-1###companies">&larr; Previous</a>
+		<cfelse><span></span></cfif>
+		<cfif companiesData.page LT companiesData.totalPages>
+		<a class="fp-btn fp-btn--ghost fp-btn--sm" href="#indexUrl#?keyword=#urlEncodedFormat( keyword )#&location=#urlEncodedFormat( locationKeyword )#&min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&work_type=#urlEncodedFormat( workTypeFilter )#&jobs_sort_by=#urlEncodedFormat( jobsData.sortBy )#&jobs_sort_dir=#urlEncodedFormat( jobsData.sortDir )#&companies_page=#companiesData.page+1###companies">Next &rarr;</a>
+		<cfelse><span></span></cfif>
+	</div>
+	</cfif>
+</div>
+
+<!--- ===================== Alerts ===================== --->
+<div id="alerts" style="position:relative;top:-64px;"></div>
+<div class="fp-wrap fp-page">
+	<div style="margin-bottom:24px;">
+		<h1 class="fp-disp fp-page-title">Your alerts</h1>
+		<div class="fp-kick fp-page-sub">#numberFormat( totalAlerts, ',' )# matches pushed &middot; page #alertsData.page# / #alertsData.totalPages#</div>
+	</div>
+	<cfif arrayLen( alertsData.rows ) EQ 0>
+	<div class="fp-card" style="padding:24px;color:var(--fp-mute);font-size:13.5px;">No alerts yet. Run the daily pipeline first.</div>
+	<cfelse>
+	<div style="display:flex;flex-direction:column;gap:12px;">
+	<cfloop array="#alertsData.rows#" index="alertRow">
+		<cfset payload = structKeyExists( alertRow, "payload" ) ? alertRow.payload : {} />
+		<cfset alertScore = structKeyExists( payload, "score" ) ? val( payload.score ) : 0 />
+		<div class="fp-card" style="padding:18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+			<div class="fp-badge #scoreToneClass( alertScore )#" style="width:48px;height:48px;">
+				<span class="fp-badge-num" style="font-size:16px;">#alertScore#</span>
+			</div>
+			<div style="flex:1;min-width:0;">
+				<div class="fp-disp" style="font-size:18px;">#encodeForHTML( structKeyExists( payload, "title" ) ? payload.title : "Untitled role" )#</div>
+				<div style="font-size:12.5px;color:var(--fp-mute);margin-top:3px;">#encodeForHTML( structKeyExists( payload, "company_name" ) ? payload.company_name : "" )#</div>
+			</div>
+			<div style="text-align:right;flex:0 0 auto;">
+				<div class="fp-kick">#encodeForHTML( alertRow.channel )#</div>
+				<div style="font-size:11.5px;color:var(--fp-mute);margin-top:4px;">#encodeForHTML( left( alertRow.sent_at, 16 ) )#</div>
+			</div>
+		</div>
+	</cfloop>
+	</div>
+	<div style="display:flex;justify-content:space-between;margin-top:24px;">
+		<cfif alertsData.page GT 1>
+		<a class="fp-btn fp-btn--ghost fp-btn--sm" href="#indexUrl#?keyword=#urlEncodedFormat( keyword )#&location=#urlEncodedFormat( locationKeyword )#&min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&work_type=#urlEncodedFormat( workTypeFilter )#&jobs_sort_by=#urlEncodedFormat( jobsData.sortBy )#&jobs_sort_dir=#urlEncodedFormat( jobsData.sortDir )#&alerts_page=#alertsData.page-1###alerts">&larr; Previous</a>
+		<cfelse><span></span></cfif>
+		<cfif alertsData.page LT alertsData.totalPages>
+		<a class="fp-btn fp-btn--ghost fp-btn--sm" href="#indexUrl#?keyword=#urlEncodedFormat( keyword )#&location=#urlEncodedFormat( locationKeyword )#&min_score=#minScore#&source=#urlEncodedFormat( rawSourceFilter )#&company_id=#companyId#&work_type=#urlEncodedFormat( workTypeFilter )#&jobs_sort_by=#urlEncodedFormat( jobsData.sortBy )#&jobs_sort_dir=#urlEncodedFormat( jobsData.sortDir )#&alerts_page=#alertsData.page+1###alerts">Next &rarr;</a>
+		<cfelse><span></span></cfif>
+	</div>
+	</cfif>
+</div>
+
+<!--- ===================== Pipeline ===================== --->
+<div id="pipeline" style="position:relative;top:-64px;"></div>
+<div class="fp-wrap fp-page">
+	<div style="margin-bottom:24px;">
+		<h1 class="fp-disp fp-page-title">Pipeline health</h1>
+		<div class="fp-kick fp-page-sub">Daily ingest &middot; dedupe &middot; score &middot; alert</div>
+	</div>
+
+	<div class="fp-card" style="background:var(--fp-deep);color:var(--fp-cream);padding:24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;">
+		<div style="display:flex;align-items:center;gap:14px;">
+			<span style="width:12px;height:12px;border-radius:50%;background:var(--fp-accent);flex:0 0 auto;"></span>
+			<div>
+				<div class="fp-disp" style="font-size:20px;">
+				<cfif structIsEmpty( runInfo )>No pipeline run yet<cfelseif lCase( runInfo.status ) EQ "success">Pipeline healthy<cfelse>Pipeline needs attention</cfif>
+				</div>
+				<div style="font-size:13px;color:rgba(243,239,228,0.7);margin-top:4px;">
+				<cfif NOT structIsEmpty( runInfo )>Last run #encodeForHTML( left( runInfo.run_at, 19 ) )#<cfelse>Use Run Daily Pipeline to start the first run.</cfif>
+				</div>
+			</div>
+		</div>
+		<a class="fp-btn fp-btn--accent" href="#appBasePath#tasks/runDailyScrape.cfm">Run now &rarr;</a>
+	</div>
+
+	<cfif arrayLen( pipelinePhases ) EQ 0>
+	<div class="fp-card" style="padding:24px;color:var(--fp-mute);font-size:13.5px;">No pipeline runs recorded yet.</div>
+	<cfelse>
+	<div class="fp-grid-3 fp-phases" style="grid-template-columns:repeat(5,1fr);">
+	<cfloop array="#pipelinePhases#" index="phaseRow">
+		<cfset statusClass = "fp-status-pill--ok" />
+		<cfif phaseRow.status EQ "WARN"><cfset statusClass = "fp-status-pill--warn" /></cfif>
+		<cfif phaseRow.status EQ "FAILED"><cfset statusClass = "fp-status-pill--failed" /></cfif>
+		<div class="fp-card" style="padding:18px;display:flex;flex-direction:column;gap:8px;">
+			<div class="fp-kick" style="color:var(--fp-mute);">#encodeForHTML( phaseRow.label )#</div>
+			<span class="fp-status-pill #statusClass#"><span class="fp-dot"></span> #encodeForHTML( phaseRow.status )#</span>
+			<div class="fp-disp" style="font-size:28px;">#numberFormat( val( phaseRow.volume ), ',' )#</div>
+			<div style="font-size:11px;color:var(--fp-mute);">#encodeForHTML( left( phaseRow.lastSync, 16 ) )#</div>
+		</div>
+	</cfloop>
+	</div>
+	</cfif>
+
+	<div style="margin-top:24px;">
+		<a class="fp-link fp-kick" style="color:var(--fp-mute);" href="#discoveryUrl#">View discovery network &rarr;</a>
+	</div>
+</div>
+
 </cfoutput>
-</main>
-
-<svg width="0" height="0" class="absolute">
-<defs>
-<linearGradient id="scoreGrad" x1="0%" x2="100%" y1="0%" y2="100%">
-<stop offset="0%" stop-color="#82cfff"></stop>
-<stop offset="100%" stop-color="#00aeef"></stop>
-</linearGradient>
-</defs>
-</svg>
 
 <cfinclude template="includes/layoutFoot.cfm" />

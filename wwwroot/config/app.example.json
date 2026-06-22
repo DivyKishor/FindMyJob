@@ -1,0 +1,26 @@
+{
+  "_comment": "Copy to config/app.json (gitignored) OR set CFINTEL_* env vars. Precedence: env > app.json > a company's ats_config > default. Env key format: CFINTEL_<UPPER_SNAKE of the dotted key>, e.g. secrets.brave_api_key -> CFINTEL_SECRETS_BRAVE_API_KEY.",
+
+  "database": {
+    "dialect": "sqlite"
+  },
+
+  "alerts": {
+    "min_score": 70,
+    "channels": ["log"]
+  },
+
+  "secrets": {
+    "adzuna_app_id": "",
+    "adzuna_app_key": "",
+    "brave_api_key": "",
+    "usajobs_api_key": "",
+    "usajobs_user_agent": "",
+    "google_cse_api_key": "",
+    "google_cse_cx": "",
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "whatsapp_token": "",
+    "whatsapp_phone_number_id": ""
+  }
+}

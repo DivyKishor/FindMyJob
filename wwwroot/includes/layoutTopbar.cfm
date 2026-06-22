@@ -1,29 +1,54 @@
 <cfparam name="searchKeyword" default="" />
-<header class="flex justify-between items-center w-full px-4 md:px-margin-desktop h-16 glass-header sticky top-0 z-50 border-b border-outline-variant/30 shadow-[0_0_30px_0_rgba(0,174,239,0.05)]">
-<div class="flex items-center gap-4 md:gap-8 min-w-0">
-<span class="font-headline-md text-lg font-bold text-primary tracking-tighter whitespace-nowrap">CF/OBSERVER</span>
-<div class="hidden lg:flex items-center gap-6">
+<cfparam name="activeSection" default="today" />
+<cfparam name="unreadAlerts" default="0" />
+
+<cfset navLinks = [
+	{ id: "today", label: "Today", href: indexUrl },
+	{ id: "board", label: "Board", href: indexUrl & "##board" },
+	{ id: "companies", label: "Companies", href: indexUrl & "##companies" },
+	{ id: "alerts", label: "Alerts", href: indexUrl & "##alerts" },
+	{ id: "pipeline", label: "Pipeline", href: indexUrl & "##pipeline" },
+	{ id: "network", label: "Network", href: discoveryUrl }
+] />
+
 <cfoutput>
-<a class="text-primary font-semibold border-b-2 border-primary pb-2 text-sm" href="#indexUrl#">Dashboard</a>
-<a class="text-outline hover:text-on-surface transition-colors text-sm" href="#indexUrl#?#healthAnchorQuery#">Pipeline</a>
-<a class="text-outline hover:text-on-surface transition-colors text-sm" href="#discoveryUrl#">Discovery</a>
-</cfoutput>
+<header class="fp-nav">
+<div class="fp-wrap fp-nav-row">
+	<a class="fp-reset fp-disp" style="font-size:20px;color:var(--fp-ink);text-decoration:none;" href="#indexUrl#">CF<span style="color:var(--fp-accent2)">/</span>OBSERVER</a>
+
+	<nav class="fp-nav-links">
+	<cfloop array="#navLinks#" index="navLink">
+		<a class="fp-link<cfif activeSection EQ navLink.id> fp-link--on</cfif>" href="#navLink.href#">#navLink.label#<cfif navLink.id EQ "alerts" AND val( unreadAlerts ) GT 0><span class="fp-nav-dot"></span></cfif></a>
+	</cfloop>
+	</nav>
+
+	<div class="fp-filterbar-spacer"></div>
+
+	<form method="get" action="#indexUrl#" class="fp-nav-search">
+		<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--fp-mute)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+		<input class="fp-in" name="keyword" placeholder="Search&hellip;" value="#encodeForHTMLAttribute( searchKeyword )#"/>
+	</form>
+
+	<a class="fp-reset fp-save fp-save--wide" id="nav-saved-link" href="##" title="Saved roles">
+		<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--fp-ink)" stroke-width="2.2" stroke-linejoin="round"><path d="M12 21s-7.5-4.9-10-9.3C.6 9 1.7 5.6 5 4.7c2-.5 3.9.4 5 2 1.1-1.6 3-2.5 5-2 3.3.9 4.4 4.3 3 7C19.5 16.1 12 21 12 21z"/></svg>
+		<span class="fp-disp" style="font-size:15px;" id="nav-saved-count">0</span>
+	</a>
+
+	<a class="fp-btn fp-btn--ink fp-btn--sm fp-nav-getalerts" href="#indexUrl###alerts">Get alerts</a>
+
+	<button type="button" class="fp-reset fp-nav-burger" id="fp-nav-burger" aria-label="Menu">
+		<svg width="18" height="18" viewBox="0 0 18 18" stroke="var(--fp-ink)" stroke-width="2"><path d="M2 4h14M2 9h14M2 14h14"/></svg>
+	</button>
 </div>
-</div>
-<cfoutput>
-<form method="get" action="#indexUrl#" class="flex items-center gap-2 flex-1 max-w-md mx-2 md:mx-8">
-<input type="hidden" name="location" value="#encodeForHTMLAttribute( locationKeyword )#"/>
-<input type="hidden" name="min_score" value="#minScore#"/>
-<input type="hidden" name="source" value="#encodeForHTMLAttribute( rawSourceFilter )#"/>
-<input type="hidden" name="company_id" value="#companyId#"/>
-<div class="relative w-full">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">search</span>
-<input class="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg pl-10 pr-4 py-1.5 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors" name="keyword" placeholder="Search CF / CFML / Lucee jobs..." type="text" value="#encodeForHTMLAttribute( searchKeyword )#"/>
-</div>
-<button type="submit" class="hidden md:inline-flex text-primary text-sm px-2">Go</button>
-</form>
-</cfoutput>
-<div class="flex items-center gap-2">
-<div class="h-8 w-8 rounded-full border border-primary/30 flex items-center justify-center text-primary text-xs font-bold numerical" title="CF/OBSERVER">CF</div>
+
+<div class="fp-wrap fp-nav-menu" id="fp-nav-menu">
+	<form method="get" action="#indexUrl#">
+		<input class="fp-in" name="keyword" placeholder="Search CF / Lucee&hellip;" value="#encodeForHTMLAttribute( searchKeyword )#"/>
+	</form>
+	<cfloop array="#navLinks#" index="navLink">
+		<a class="fp-link<cfif activeSection EQ navLink.id> fp-link--on</cfif>" href="#navLink.href#">#navLink.label#<cfif navLink.id EQ "alerts" AND val( unreadAlerts ) GT 0><span class="fp-nav-dot"></span></cfif></a>
+	</cfloop>
+	<a class="fp-btn fp-btn--ink fp-btn--sm" href="#indexUrl###alerts">Get alerts</a>
 </div>
 </header>
+</cfoutput>

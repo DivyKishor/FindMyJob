@@ -1,12 +1,19 @@
 <cfcomponent output="false" accessors="true">
 	<cfproperty name="databaseService" type="any" />
 	<cfproperty name="jobScoreRuleVersion" type="string" />
+	<cfproperty name="taxonomy" type="any" />
 
 	<cffunction name="init" access="public" returntype="any" output="false">
 		<cfargument name="databaseService" type="any" required="true" />
-		<cfargument name="jobScoreRuleVersion" type="string" required="false" default="v2_cf_direct" />
+		<cfargument name="jobScoreRuleVersion" type="string" required="false" default="v4_cf_ecosystem" />
+		<cfargument name="taxonomy" type="any" required="false" default="" />
 		<cfset variables.databaseService = arguments.databaseService />
 		<cfset variables.jobScoreRuleVersion = arguments.jobScoreRuleVersion />
+		<cfif isObject( arguments.taxonomy )>
+			<cfset variables.taxonomy = arguments.taxonomy />
+		<cfelse>
+			<cfset variables.taxonomy = createObject( "component", "services.TechTaxonomy" ).init() />
+		</cfif>
 		<cfreturn this />
 	</cffunction>
 
@@ -14,13 +21,11 @@
 		<cfreturn variables.databaseService.getDatasource() />
 	</cffunction>
 
-	<!--- When the user searches "coldfusion" or "cf", match all CF stack terms we ingest/score. --->
+	<!--- When the user searches an umbrella term ("coldfusion"/"cf"/...), match all
+	      ecosystem terms (incl. ColdBox/FuseBox/CommandBox/WireBox) via the taxonomy. --->
 	<cffunction name="expandCfKeywordTerms" access="private" returntype="array" output="false">
 		<cfargument name="keyword" type="string" required="true" />
-		<cfset kw = lCase( trim( arguments.keyword ) ) />
-		<cfset umbrella = [ "coldfusion", "cfml", "lucee", "mura", "cold fusion", "cfscript", "adobe cf", "cf developer" ] />
-		<cfif kw EQ "coldfusion" OR kw EQ "cf" OR kw EQ "cfml" OR kw EQ "lucee"><cfreturn umbrella /></cfif>
-		<cfreturn [ trim( arguments.keyword ) ] />
+		<cfreturn variables.taxonomy.expandKeyword( arguments.keyword ) />
 	</cffunction>
 
 	<cffunction name="countAll" access="public" returntype="numeric" output="false">
@@ -48,6 +53,32 @@
 		<cfreturn pageData.rows />
 	</cffunction>
 
+	<!---
+		Classify work arrangement from job text.
+		Checks title + location first (highest signal), then up to 2000 chars of description.
+		Returns: remote | hybrid | onsite | unknown
+	--->
+	<cffunction name="classifyWorkType" access="public" returntype="string" output="false">
+		<cfargument name="title" type="string" required="false" default="" />
+		<cfargument name="location" type="string" required="false" default="" />
+		<cfargument name="description" type="string" required="false" default="" />
+		<cfset var haystack = lCase( trim( arguments.title ) & " " & trim( arguments.location ) & " " & left( trim( arguments.description ), 2000 ) ) />
+		<cfset var p = "" />
+		<cfloop list="remote,work from home,wfh,telecommute,fully remote,100% remote,work remotely,remote only,remote-only,remote first,remote-first,anywhere in the world,distributed team,globally remote,location independent,location: remote,remote position,remote role,remote opportunity" index="p">
+			<cfif find( trim( p ), haystack )><cfreturn "remote" /></cfif>
+		</cfloop>
+		<cfloop list="hybrid,partial remote,semi-remote,flexible work,flex work,2-3 days,3 days in office,mix of remote,occasional office,blended work" index="p">
+			<cfif find( trim( p ), haystack )><cfreturn "hybrid" /></cfif>
+		</cfloop>
+		<cfloop list="on-site only,onsite only,no remote work,no remote,required to be in office,in-office required,must be local,relocation required,must relocate,office-based,physically present" index="p">
+			<cfif find( trim( p ), haystack )><cfreturn "onsite" /></cfif>
+		</cfloop>
+		<cfloop list="on-site,onsite,on site,in office,in-office" index="p">
+			<cfif find( trim( p ), haystack )><cfreturn "onsite" /></cfif>
+		</cfloop>
+		<cfreturn "unknown" />
+	</cffunction>
+
 	<cffunction name="listPaged" access="public" returntype="struct" output="false">
 		<cfargument name="companyId" type="numeric" required="false" default="0" />
 		<cfargument name="keyword" type="string" required="false" default="" />
@@ -58,6 +89,7 @@
 		<cfargument name="sortDir" type="string" required="false" default="desc" />
 		<cfargument name="locationKeyword" type="string" required="false" default="" />
 		<cfargument name="rawSource" type="string" required="false" default="" />
+		<cfargument name="workType" type="string" required="false" default="" />
 
 		<cfif arguments.page LT 1><cfset arguments.page = 1 /></cfif>
 		<cfif arguments.pageSize LT 1><cfset arguments.pageSize = 25 /></cfif>
@@ -127,6 +159,30 @@
 					<cfset arrayAppend( params, { value: cityLike, cfsqltype: "cf_sql_longvarchar" } ) />
 				</cfloop>
 				<cfset fromSql = fromSql & arrayToList( indiaFieldClauses, " OR " ) & ")" />
+
+			<cfelseif locKw EQ "india-eligible" OR locKw EQ "worldwide">
+				<!---
+					Globally accessible filter: exclude jobs whose location field explicitly
+					restricts to US, UK, AU, or CA.  Does NOT require India to be mentioned —
+					it passes through "Remote", "Worldwide", blank locations, etc.
+				--->
+				<cfset fromSql = fromSql & " AND NOT (
+					lower(j.location) LIKE '%united states%'
+					OR lower(j.location) LIKE '%united kingdom%'
+					OR lower(j.location) LIKE '% usa%'
+					OR lower(j.location) LIKE '%, australia%'
+					OR lower(j.location) LIKE '%, canada%'
+					OR lower(j.location) LIKE '%us only%'
+					OR lower(j.location) LIKE '%uk only%'
+					OR lower(j.location) LIKE '%, us,%'
+					OR lower(j.location) LIKE '%, us'
+					OR lower(j.description) LIKE '%must be authorized to work in the united states%'
+					OR lower(j.description) LIKE '%authorized to work in the u.s.%'
+					OR lower(j.description) LIKE '%us citizens only%'
+					OR lower(j.description) LIKE '%united states citizens%'
+					OR lower(j.description) LIKE '%security clearance%'
+				)" />
+
 			<cfelse>
 				<cfset locationLike = "%" & arguments.locationKeyword & "%" />
 				<!--- India/remote often appear in title or description, not only the location column --->
@@ -139,6 +195,10 @@
 		<cfif len( trim( arguments.rawSource ) )>
 			<cfset fromSql = fromSql & " AND j.raw_source = ?" />
 			<cfset arrayAppend( params, { value: trim( arguments.rawSource ), cfsqltype: "cf_sql_varchar" } ) />
+		</cfif>
+		<cfif len( trim( arguments.workType ) ) AND listFind( "remote,hybrid,onsite,unknown", lCase( trim( arguments.workType ) ) )>
+			<cfset fromSql = fromSql & " AND j.work_type = ?" />
+			<cfset arrayAppend( params, { value: lCase( trim( arguments.workType ) ), cfsqltype: "cf_sql_varchar" } ) />
 		</cfif>
 
 		<cfset countQ = queryExecute( "SELECT COUNT(*) AS cnt" & fromSql, params, { datasource: ds() } ) />
@@ -153,6 +213,7 @@
 		<cfset offsetRows = ( arguments.page - 1 ) * arguments.pageSize />
 
 		<cfset dataSql = "SELECT j.id, j.company_id, j.external_id, j.title, j.description, j.location, j.link, j.raw_source, j.fetched_at,
+		                         COALESCE(j.work_type, 'unknown') AS work_type, COALESCE(j.is_active, 1) AS is_active,
 		                         c.name AS company_name, COALESCE(js.score, 0) AS score" &
 			fromSql &
 			" ORDER BY " & sortMap[ safeSortBy ] & " " & safeSortDir & ", j.id DESC LIMIT ? OFFSET ?" />
@@ -186,16 +247,19 @@
 		<cfargument name="location" type="string" required="false" default="" />
 		<cfargument name="link" type="string" required="true" />
 		<cfargument name="rawSource" type="string" required="true" />
+		<cfset var wt = classifyWorkType( arguments.title, arguments.location, arguments.description ) />
 		<cfset queryExecute(
-			"INSERT INTO jobs (company_id, external_id, title, description, location, link, raw_source, fetched_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+			"INSERT INTO jobs (company_id, external_id, title, description, location, link, raw_source, fetched_at, first_seen_at, work_type, is_active)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, 1)
 			 ON CONFLICT(company_id, external_id) DO UPDATE SET
 			   title = excluded.title,
 			   description = excluded.description,
 			   location = excluded.location,
 			   link = excluded.link,
 			   raw_source = excluded.raw_source,
-			   fetched_at = datetime('now')",
+			   fetched_at = datetime('now'),
+			   work_type = excluded.work_type,
+			   is_active = 1",
 			[
 				{ value: arguments.companyId, cfsqltype: "cf_sql_integer" },
 				{ value: arguments.externalId, cfsqltype: "cf_sql_varchar" },
@@ -203,7 +267,8 @@
 				{ value: arguments.description, cfsqltype: "cf_sql_longvarchar" },
 				{ value: arguments.location, cfsqltype: "cf_sql_varchar" },
 				{ value: arguments.link, cfsqltype: "cf_sql_varchar" },
-				{ value: arguments.rawSource, cfsqltype: "cf_sql_varchar" }
+				{ value: arguments.rawSource, cfsqltype: "cf_sql_varchar" },
+				{ value: wt, cfsqltype: "cf_sql_varchar" }
 			],
 			{ datasource: ds() }
 		) />
@@ -284,5 +349,89 @@
 			{},
 			{ datasource: ds() }
 		) />
+	</cffunction>
+
+	<!--- Jobs due for an expiry HTTP check: not checked in minDays days, oldest first. --->
+	<cffunction name="listForExpiryCheck" access="public" returntype="array" output="false">
+		<cfargument name="limit" type="numeric" required="false" default="50" />
+		<cfargument name="minDaysSinceCheck" type="numeric" required="false" default="7" />
+		<cfset var safeLimit = max( 1, min( 200, int( arguments.limit ) ) ) />
+		<cfset var safeDays = max( 1, int( arguments.minDaysSinceCheck ) ) />
+		<cfset var q = queryExecute(
+			"SELECT j.id, j.title, j.link, j.is_active, c.name AS company_name
+			 FROM jobs j INNER JOIN companies c ON c.id = j.company_id
+			 WHERE ( j.last_checked_at IS NULL OR j.last_checked_at <= datetime('now', '-#safeDays# days') )
+			   AND j.link IS NOT NULL AND trim(j.link) <> ''
+			 ORDER BY j.last_checked_at ASC, j.fetched_at ASC
+			 LIMIT #safeLimit#",
+			{},
+			{ datasource: ds() }
+		) />
+		<cfset var rows = [] />
+		<cfloop query="q">
+			<cfset arrayAppend( rows, { id: q.id, title: q.title, link: q.link, is_active: q.is_active, company_name: q.company_name } ) />
+		</cfloop>
+		<cfreturn rows />
+	</cffunction>
+
+	<!--- Update a job's active status and last-checked timestamp. --->
+	<cffunction name="updateJobStatus" access="public" returntype="void" output="false">
+		<cfargument name="jobId" type="numeric" required="true" />
+		<cfargument name="isActive" type="boolean" required="true" />
+		<cfset queryExecute(
+			"UPDATE jobs SET is_active = ?, last_checked_at = datetime('now') WHERE id = ?",
+			[
+				{ value: arguments.isActive ? 1 : 0, cfsqltype: "cf_sql_integer" },
+				{ value: arguments.jobId, cfsqltype: "cf_sql_integer" }
+			],
+			{ datasource: ds() }
+		) />
+	</cffunction>
+
+	<!--- Jobs first seen within the last N hours, ordered by most recent then highest score. --->
+	<cffunction name="listNew" access="public" returntype="array" output="false">
+		<cfargument name="hoursAgo" type="numeric" required="false" default="24" />
+		<cfargument name="maxRows"  type="numeric" required="false" default="20" />
+		<cfset var safeHours = max( 1, int( arguments.hoursAgo ) ) />
+		<cfset var safeMax   = max( 1, min( 200, int( arguments.maxRows ) ) ) />
+		<cfset var q = queryExecute(
+			"SELECT j.id, j.title, j.location, j.link, COALESCE(j.first_seen_at, j.fetched_at) AS fetched_at, j.raw_source,
+			        COALESCE(j.work_type, 'unknown') AS work_type,
+			        c.name AS company_name, COALESCE(js.score, 0) AS score
+			 FROM jobs j
+			 INNER JOIN companies c ON c.id = j.company_id
+			 LEFT JOIN job_scores js ON js.job_id = j.id AND js.rule_version = ?
+			 WHERE COALESCE(j.first_seen_at, j.fetched_at) >= datetime('now', '-#safeHours# hours')
+			 ORDER BY COALESCE(j.first_seen_at, j.fetched_at) DESC, COALESCE(js.score, 0) DESC
+			 LIMIT #safeMax#",
+			[ { value: variables.jobScoreRuleVersion, cfsqltype: "cf_sql_varchar" } ],
+			{ datasource: ds() }
+		) />
+		<cfset var rows = [] />
+		<cfloop query="q">
+			<cfset arrayAppend( rows, {
+				id:           q.id,
+				title:        q.title,
+				company_name: q.company_name,
+				location:     q.location,
+				link:         q.link,
+				fetched_at:   q.fetched_at,
+				raw_source:   q.raw_source,
+				score:        q.score
+			}) />
+		</cfloop>
+		<cfreturn rows />
+	</cffunction>
+
+	<!--- Count of jobs first seen within the last N hours. --->
+	<cffunction name="countNew" access="public" returntype="numeric" output="false">
+		<cfargument name="hoursAgo" type="numeric" required="false" default="24" />
+		<cfset var safeHours = max( 1, int( arguments.hoursAgo ) ) />
+		<cfset var q = queryExecute(
+			"SELECT COUNT(*) AS n FROM jobs WHERE fetched_at >= datetime('now', '-#safeHours# hours')",
+			{},
+			{ datasource: ds() }
+		) />
+		<cfreturn val( q.n ) />
 	</cffunction>
 </cfcomponent>

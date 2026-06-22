@@ -2,6 +2,17 @@
 
 Production-oriented **Adobe ColdFusion 2025 (CFML)** system that seeds companies, ingests **ColdFusion / CFML / Lucee** job postings from many public sources (job-board APIs, ATS boards, open-web search, and curated career pages), stores rows in **SQLite**, and provides both JSON APIs and a server-rendered **CF/OBSERVER** dashboard. Focused on **India & remote-eligible** roles while still capturing CF openings worldwide.
 
+## Recent updates (2026-06-14)
+
+- **Job expiry checker**: `ExpiryCheckerService.checkBatch()` sends HEAD/GET requests to stored job URLs and marks 404/410 responses as `is_active = 0`. Jobs resurface as active when next scraped. Expired jobs show an **EXPIRED** badge in the feed. Run manually via `tasks/checkJobExpiry.cfm?limit=50&min_days=7` or via the registered Lucee scheduled task.
+- **Work-type classifier**: `JobService.classifyWorkType()` inspects title + location + description on every upsert and sets `work_type` (remote / hybrid / onsite / unknown). Dashboard adds **work-type filter chips** and per-card badges (blue REMOTE, yellow HYBRID, grey ONSITE).
+- **Scheduled auto-run**: `tasks/setupSchedule.cfm` registers two Lucee scheduled tasks — daily scrape at 06:00 and expiry check every 3 days at 03:00. Call once; tasks persist in Lucee's scheduler.
+- **Schema migrations**: `DatabaseService.ensureMigrations()` safely adds `is_active`, `last_checked_at`, `work_type`, `first_seen_at` to existing `jobs` rows (try/catch ALTER TABLE — safe on repeated app restarts).
+- **New Leads section**: dashboard panel shows jobs first seen in the last 6 h / 24 h / 48 h / 7 d, with score colour-coding and Apply links.
+- **Bug fix — `COMPANIESPROCESSED` crash**: `ScrapeOrchestrator.enrichCompanyLinks()` was setting `variables.summary` without `var`, clobbering `runAll()`'s summary struct. Fixed with `var` scope on all three `summary` declarations in the file.
+- **Bug fix — `DiscoveryService` syntax**: backslash-escaped quotes (`\"`) in struct literals now correctly use CFML double-double-quote escaping (`""`).
+- **server.json fix**: `webroot` moved from `app` section (ignored by CommandBox) to `web` section.
+
 ## Recent updates (2026-06-04)
 
 - **CF/OBSERVER dashboard** (`/index.cfm`): dark Tailwind UI with bento stats, pipeline health table, master-detail job feed (radial score rings), paginated companies/alerts, USP strip, and sidebar Operator tools. Shared layout in `wwwroot/includes/`; styles in `wwwroot/assets/cf-observer.css`.
@@ -33,7 +44,7 @@ Production-oriented **Adobe ColdFusion 2025 (CFML)** system that seeds companies
 - **Company link enrichment**: `ScrapeOrchestrator.enrichCompanyLinks()` resolves missing `website` / `careers_url` for seeded and discovered companies; runs automatically at the end of `runAll()` (bounded). `CompanyService.fillCompanyLinks()` updates only empty fields.
 - **DevJobsScanner employer promotion**: optional post-ingest step registers resolved employers as `career_page_scan` rows (`discovery_source = devjobsscanner`); one-time backfill via `tasks/promoteDevJobsScannerEmployers.cfm`.
 - **Endpoints**: `api/companies.cfm`, `api/jobs.cfm` (filters: `company_id`, `keyword`, `min_score`, `location`, `source`), `api/alerts.cfm`
-- **Tasks**: `tasks/seed.cfm`, `tasks/runDiscovery.cfm`, `tasks/scoreJobs.cfm`, `tasks/generateAlerts.cfm`, `tasks/runDailyScrape.cfm`, `tasks/pruneIrrelevantJobs.cfm`, `tasks/backfillJobCompanies.cfm`, `tasks/enrichCompanyLinks.cfm`, `tasks/promoteDevJobsScannerEmployers.cfm`
+- **Tasks**: `tasks/seed.cfm`, `tasks/runDiscovery.cfm`, `tasks/scoreJobs.cfm`, `tasks/generateAlerts.cfm`, `tasks/runDailyScrape.cfm`, `tasks/pruneIrrelevantJobs.cfm`, `tasks/backfillJobCompanies.cfm`, `tasks/enrichCompanyLinks.cfm`, `tasks/promoteDevJobsScannerEmployers.cfm`, `tasks/checkJobExpiry.cfm` (HEAD-checks stored URLs; marks 404/410 as expired), `tasks/setupSchedule.cfm` (registers Lucee cfschedule tasks for daily scrape + expiry check)
 - **JDBC**: `wwwroot/lib/sqlite-jdbc.jar` (download via `scripts/install-deps.sh`; gitignored)
 
 ## Prerequisites (CF2025 only)
@@ -83,11 +94,18 @@ Pipeline order (`PipelineService.runDaily`): **CF Global Watcher → Discovery �
 Database file: `wwwroot/data/coldfusion_intel.db`  
 Log file: `wwwroot/logs/scrape.log`
 
-## Scheduled task (daily)
+## Scheduled tasks
 
-In **Adobe ColdFusion Administrator** -> **Scheduled Tasks**, create a daily HTTP task for:
+Hit `/tasks/setupSchedule.cfm` once to register two Lucee scheduled tasks automatically:
 
-`/tasks/runDailyScrape.cfm`
+| Task | URL | Schedule |
+|------|-----|----------|
+| `CF_Observer_Daily_Scrape` | `/tasks/runDailyScrape.cfm` | Daily at 06:00 |
+| `CF_Observer_Expiry_Check` | `/tasks/checkJobExpiry.cfm?limit=60&min_days=7` | Every 3 days at 03:00 |
+
+Pass `?base_url=http://YOUR_HOST&scrape_time=06:00+AM` to customise. Tasks appear in **Lucee Admin → Scheduled Tasks** after registration.
+
+For **Adobe ColdFusion Administrator** → **Scheduled Tasks**, create equivalent HTTP tasks pointing to the same URLs.
 
 (Use IP allowlisting or a secret key guard before exposing task URLs on the public internet.)
 
@@ -98,7 +116,8 @@ In **Adobe ColdFusion Administrator** -> **Scheduled Tasks**, create a daily HTT
 | `Application.cfc` | Datasource, JDBC classpath, service wiring, schema + seed on startup |
 | `services/DatabaseService.cfc` | Schema apply, `PRAGMA foreign_keys`, query -> array |
 | `services/CompanyService.cfc` | Companies + JSON seed; `listCompaniesMissingLinks`, `fillCompanyLinks`, `listUnpromotedExternalEmployers` |
-| `services/JobService.cfc` | List with filters (CF keyword expansion, location in title/desc/location), UPSERT, company reassign/dedupe |
+| `services/JobService.cfc` | List with filters (CF keyword expansion, location, work_type), UPSERT (auto-classifies work_type; sets is_active=1), expiry check helpers, `listNew()` |
+| `services/ExpiryCheckerService.cfc` | HEAD/GET checks stored job URLs; marks 404/410 as `is_active=0`; `checkBatch(limit, minDaysSinceCheck)` |
 | `services/HttpClientService.cfc` | CFHTTP with timeout, header overrides, and retry-with-backoff on transient failures |
 | `services/GreenhouseParser.cfc` | Public board JSON -> normalized job structs |
 | `services/ScrapeOrchestrator.cfc` | Per-source ingestion (boards, ATS scans, DevJobsScanner, CF Global Watcher, Reddit, USAJOBS), link enrichment, employer promotion, backfill |
