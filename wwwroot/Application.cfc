@@ -88,6 +88,34 @@
 		<cfset application.atsDetector = createObject("component", "services.AtsDetector").init( application.atsRegistry ) />
 		<!--- PR 1.7: career/job URL helpers extracted from the orchestrator. --->
 		<cfset application.careerPageDiscoverer = createObject("component", "services.CareerPageDiscoverer").init( application.atsDetector ) />
+
+		<!--- Phase 3: self-expanding source graph, expansion engine, onboarding, scheduler. --->
+		<cfset application.sourceGraphService = createObject("component", "services.SourceGraphService").init(
+			application.dataGateway,
+			application.loggerService
+		) />
+		<cfset application.sourceExpansionService = createObject("component", "services.SourceExpansionService").init(
+			application.sourceGraphService,
+			application.loggerService
+		) />
+		<cfset application.sourceAdapter = createObject("component", "services.SourceAdapter").init() />
+		<cfset application.sourceRegistryService = createObject("component", "services.SourceRegistryService").init(
+			application.dataGateway,
+			application.sourceAdapter,
+			application.sourceGraphService,
+			application.loggerService
+		) />
+		<cfset application.sourceScheduler = createObject("component", "services.SourceScheduler").init() />
+
+		<!--- GitHub company discovery: CF orgs + employers of CF devs (from repos/affiliations). --->
+		<cfset application.githubDiscoveryService = createObject("component", "services.GithubDiscoveryService").init(
+			application.dataGateway,
+			application.httpClientService,
+			application.appConfig,
+			application.loggerService,
+			application.sourceGraphService,
+			application.careerPageDiscoverer
+		) />
 		<cfset application.scrapeOrchestrator = createObject("component", "services.ScrapeOrchestrator").init(
 			application.companyService,
 			application.jobService,
@@ -141,7 +169,53 @@
 
 		<cfset application.companyService.seedIfEmpty() />
 		<cfset application.companyService.ensureFeedSources() />
+
+		<!--- Self-registering Lucee scheduled tasks. Runs INSIDE Lucee, so it calls
+		     localhost directly — no sandbox/ngrok/network dependency. Auto-(re)registers
+		     on every app start and on ?reinit=1. action="update" is create-or-overwrite,
+		     so this is safe to re-run. Edit times/base URL via config/app.json if desired. --->
+		<cfset registerScheduledTasks() />
+
 		<cfreturn true />
+	</cffunction>
+
+	<cffunction name="registerScheduledTasks" access="private" returntype="void" output="false">
+		<cfset var baseUrl    = "http://127.0.0.1:8888" />
+		<cfset var today      = dateFormat( now(), "mm/dd/yyyy" ) />
+
+		<!--- Append the task key (if configured) so scheduled HTTPRequests pass the guard. --->
+		<cfset var taskKey = structKeyExists( application, "appConfig" ) ? trim( application.appConfig.get( "security.task_key", "" ) ) : "" />
+
+		<!--- Lean, cost-tuned cadence (staggered off-peak so a small box never runs two heavy jobs at once). --->
+		<cfset var jobs = [
+			{ name: "CF_Observer_Daily_Scrape",   path: "/tasks/runDailyScrape.cfm",            time: "06:00 AM", interval: "daily" },
+			{ name: "CF_Observer_Evening_Scrape", path: "/tasks/runDailyScrape.cfm",            time: "06:00 PM", interval: "daily" },
+			{ name: "CF_Observer_Fingerprint",    path: "/tasks/fingerprintCompanies.cfm?max=75", time: "02:00 AM", interval: "daily" },
+			{ name: "CF_Observer_Company_Score",  path: "/tasks/scoreCompanies.cfm",            time: "02:45 AM", interval: "daily" },
+			{ name: "CF_Observer_Expiry_Check",   path: "/tasks/checkJobExpiry.cfm?limit=60&min_days=7", time: "03:15 AM", interval: "259200" },
+			{ name: "CF_Observer_Source_Expand",  path: "/tasks/expandSources.cfm",             time: "04:00 AM", interval: "604800" },
+			{ name: "CF_Observer_Github",         path: "/tasks/harvestGithub.cfm?max=60",      time: "04:30 AM", interval: "604800" }
+		] />
+
+		<cfloop array="#jobs#" index="jobDef">
+			<cftry>
+				<cfset var sep = ( find( "?", jobDef.path ) GT 0 ) ? "&" : "?" />
+				<cfset var fullUrl = baseUrl & jobDef.path & ( len( taskKey ) ? sep & "key=" & taskKey : "" ) />
+				<cfschedule
+					action="update"
+					task="#jobDef.name#"
+					operation="HTTPRequest"
+					url="#fullUrl#"
+					startDate="#today#"
+					startTime="#jobDef.time#"
+					interval="#jobDef.interval#"
+					resolveUrl="no"
+					publish="no" />
+				<cfcatch type="any">
+					<cfset application.loggerService.error( "scheduler: failed to register " & jobDef.name, cfcatch ) />
+				</cfcatch>
+			</cftry>
+		</cfloop>
 	</cffunction>
 
 	<cffunction name="onRequestStart" access="public" returntype="void" output="false">
@@ -150,5 +224,21 @@
 			<cfset onApplicationStart() />
 		</cfif>
 		<cfset application.databaseService.ensureForeignKeys() />
+
+		<!--- Secret-key guard for /tasks/ endpoints. Only enforced when security.task_key
+		     is configured (env CFINTEL_SECURITY_TASK_KEY or config/app.json), so local
+		     dev stays open while public hosting can lock task triggers down. --->
+		<cfif findNoCase( "/tasks/", arguments.targetPage ) GT 0>
+			<cfset var taskKey = structKeyExists( application, "appConfig" ) ? trim( application.appConfig.get( "security.task_key", "" ) ) : "" />
+			<cfif len( taskKey )>
+				<cfset var provided = ( structKeyExists( url, "key" ) AND isSimpleValue( url.key ) ) ? trim( url.key ) : "" />
+				<cfif provided NEQ taskKey>
+					<cfheader statusCode="403" />
+					<cfcontent type="application/json; charset=utf-8" />
+					<cfoutput>#serializeJSON( { ok: false, error: "Forbidden: missing or invalid task key" } )#</cfoutput>
+					<cfabort />
+				</cfif>
+			</cfif>
+		</cfif>
 	</cffunction>
 </cfcomponent>
