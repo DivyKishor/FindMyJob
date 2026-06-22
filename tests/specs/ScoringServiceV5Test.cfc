@@ -18,8 +18,40 @@
 			});
 
 			// ─── Rule version ─────────────────────────────────────────────────────
-			it( "reports v5_layered rule version", function(){
-				expect( variables.svc.getRuleVersion() ).toBe( "v5_layered" );
+			it( "reports v7_sponsor_negation rule version", function(){
+				expect( variables.svc.getRuleVersion() ).toBe( "v7_sponsor_negation" );
+			});
+
+			it( "does NOT count negative sponsorship phrases as sponsorship", function(){
+				// "without employer sponsorship" / "no H-1B sponsorship" mean the opposite.
+				expect( variables.svc.classifyVisaSponsorship( "Must be authorized to work in the US without employer sponsorship" ) ).toBe( 0 );
+				expect( variables.svc.classifyVisaSponsorship( "No H-1B sponsorship available for this role" ) ).toBe( 0 );
+				var r = variables.svc.scoreJob(
+					"ColdFusion Developer",
+					"Must be legally authorized to work in the United States without employer sponsorship, now or in the future.",
+					"United States" );
+				var joined = arrayToList( r.reasons, "|" );
+				expect( joined ).notToInclude( "visa_sponsorship" );
+				expect( joined ).toInclude( "work_auth_restricted" );
+				expect( r.score ).toBeLT( 50 );
+			});
+
+			// ─── v6: sponsorship overrides the work-auth penalty ─────────────────
+			it( "lets visa sponsorship override the US work-auth penalty", function(){
+				var r = variables.svc.scoreJob(
+					"ColdFusion Developer",
+					"US role. Visa sponsorship available for the right candidate.",
+					"New York, United States" );
+				var joined = arrayToList( r.reasons, "|" );
+				expect( joined ).toInclude( "visa_sponsorship:" );
+				expect( joined ).notToInclude( "work_auth_restricted" );
+				expect( r.score ).toBeGTE( 70 );
+			});
+
+			it( "still penalises a US role that does NOT sponsor", function(){
+				var r = variables.svc.scoreJob( "ColdFusion Developer", "Must be a US citizen.", "Texas" );
+				expect( arrayToList( r.reasons, "|" ) ).toInclude( "work_auth_restricted" );
+				expect( r.score ).toBeLT( 50 );
 			});
 
 			// ─── cf_match layer ──────────────────────────────────────────────────
@@ -86,10 +118,10 @@
 			});
 
 			// ─── visa_sponsorship layer ───────────────────────────────────────────
-			it( "classifyVisaSponsorship returns 15 for explicit sponsorship language", function(){
-				expect( variables.svc.classifyVisaSponsorship( "coldfusion developer - visa sponsorship available" ) ).toBe( 15 );
-				expect( variables.svc.classifyVisaSponsorship( "we will sponsor H-1B for the right candidate" ) ).toBe( 15 );
-				expect( variables.svc.classifyVisaSponsorship( "able to sponsor work visa" ) ).toBe( 15 );
+			it( "classifyVisaSponsorship returns 20 for explicit sponsorship language", function(){
+				expect( variables.svc.classifyVisaSponsorship( "coldfusion developer - visa sponsorship available" ) ).toBe( 20 );
+				expect( variables.svc.classifyVisaSponsorship( "we will sponsor H-1B for the right candidate" ) ).toBe( 20 );
+				expect( variables.svc.classifyVisaSponsorship( "able to sponsor work visa" ) ).toBe( 20 );
 			});
 
 			it( "classifyVisaSponsorship returns 0 when no sponsorship language present", function(){
@@ -98,7 +130,7 @@
 
 			it( "visa_sponsorship bonus appears in scoreJob return struct", function(){
 				var r = variables.svc.scoreJob( "ColdFusion Developer", "Visa sponsorship available for this role", "Remote" );
-				expect( r.visaSponsorship ).toBe( 15 );
+				expect( r.visaSponsorship ).toBe( 20 );
 				var joinedReasons = arrayToList( r.reasons, "|" );
 				expect( joinedReasons ).toInclude( "visa_sponsorship" );
 			});
