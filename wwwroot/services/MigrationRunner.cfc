@@ -95,6 +95,8 @@
 				<cfset arrayAppend( out, nm ) />
 			</cfif>
 		</cfloop>
+		<!--- Explicit sort: Lucee directoryList sort is not reliably honored across OSes (Linux CI returned files unsorted -> 0005 ran before 0001). --->
+		<cfset arraySort( out, "textnocase", "asc" ) />
 		<cfreturn out />
 	</cffunction>
 
