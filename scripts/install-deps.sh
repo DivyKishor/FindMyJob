@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LIB_DIR="$ROOT_DIR/wwwroot/lib"
 SQLITE_JAR="sqlite-jdbc.jar"
-SQLITE_URL="https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.47.3.0/sqlite-jdbc-3.47.3.0.jar"
+SQLITE_URL="https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.46.0.0/sqlite-jdbc-3.46.0.0.jar"
 
 mkdir -p "$LIB_DIR"
 

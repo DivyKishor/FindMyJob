@@ -71,15 +71,23 @@
 			</cfif>
 		</cfif>
 
-		<!--- Load job count. --->
-		<cfset var jobCountRow = variables.dataGateway.queryRow(
-			"SELECT COUNT(*) AS cnt FROM jobs WHERE company_id = ?",
+		<!--- Job history with a recency window: jobs in the last 365 days drive the base
+		     sub-score; jobs in the last 90 days add a "hiring now" bump. --->
+		<cfset var jobs365Row = variables.dataGateway.queryRow(
+			"SELECT COUNT(*) AS cnt FROM jobs
+			 WHERE company_id = ? AND COALESCE(first_seen_at, fetched_at) >= datetime('now', '-365 days')",
 			[ { value: cid, cfsqltype: "cf_sql_integer" } ]
 		) />
-		<cfset var jobCount = structKeyExists( jobCountRow, "cnt" ) ? val( jobCountRow.cnt ) : 0 />
+		<cfset var jobs90Row = variables.dataGateway.queryRow(
+			"SELECT COUNT(*) AS cnt FROM jobs
+			 WHERE company_id = ? AND COALESCE(first_seen_at, fetched_at) >= datetime('now', '-90 days')",
+			[ { value: cid, cfsqltype: "cf_sql_integer" } ]
+		) />
+		<cfset var jobs365 = structKeyExists( jobs365Row, "cnt" ) ? val( jobs365Row.cnt ) : 0 />
+		<cfset var jobs90  = structKeyExists( jobs90Row, "cnt" ) ? val( jobs90Row.cnt ) : 0 />
 
-		<!--- Compute pure score. --->
-		<cfset var result = scoreCompanyData( fpRows, sigRows, jobCount ) />
+		<!--- Compute pure score (jobCount = last-12-month count; jobs90d = last-90-day count). --->
+		<cfset var result = scoreCompanyData( fpRows, sigRows, jobs365, jobs90 ) />
 
 		<!--- Persist to company_scores and update companies.cf_likelihood_score. --->
 		<cfset persistCompanyScore( cid, result.score, result.reasons ) />
@@ -97,7 +105,9 @@
 	<cffunction name="scoreCompanyData" access="public" returntype="struct" output="false">
 		<cfargument name="fpRows"     type="array"   required="true" />
 		<cfargument name="signalRows" type="array"   required="true" />
-		<cfargument name="jobCount"   type="numeric" required="true" />
+		<cfargument name="jobCount"   type="numeric" required="true" /><!--- jobs in last 12 months --->
+		<cfargument name="jobs90d"    type="numeric" required="false" default="0" /><!--- jobs in last 90 days --->
+
 
 		<cfset var reasons = [] />
 
@@ -129,7 +139,7 @@
 			</cfif>
 		</cfif>
 
-		<!--- Job history subscore (0-20). --->
+		<!--- Job history subscore (0-20): base by 12-month volume, + recency bump. --->
 		<cfset var jobScore = 0 />
 		<cfif arguments.jobCount GTE 10>
 			<cfset jobScore = 20 />
@@ -140,6 +150,13 @@
 		</cfif>
 		<cfif arguments.jobCount GT 0>
 			<cfset arrayAppend( reasons, "jobs:" & arguments.jobCount ) />
+		</cfif>
+		<!--- Recently-hiring companies are stronger leads: bump if they posted in the last 90 days. --->
+		<cfif arguments.jobs90d GTE 3>
+			<cfset jobScore = min( 20, jobScore + 5 ) />
+			<cfset arrayAppend( reasons, "hiring_now:" & arguments.jobs90d & "_in_90d" ) />
+		<cfelseif arguments.jobs90d GTE 1>
+			<cfset arrayAppend( reasons, "recent_posting:" & arguments.jobs90d & "_in_90d" ) />
 		</cfif>
 
 		<cfset var totalScore = min( 100, fpScore + discovScore + jobScore ) />

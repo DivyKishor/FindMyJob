@@ -50,7 +50,7 @@
 			<cfset companyName = companiesQ.name[ i ] />
 			<cfif structKeyExists( companiesQ, "careers_source" )><cfset source = lCase( trim( companiesQ.careers_source[ i ] ) ) /><cfelse><cfset source = "" /></cfif>
 			<cfset cfg = parseConfig( companiesQ.ats_config[ i ] ) />
-			<cfif listFindNoCase( "greenhouse,remotive_feed,arbeitnow_feed,adzuna_feed,getcfmljobs_feed,google_cse_feed,cutshort_scan,linkedin_public,foundit_scan,shine_scan,weekday_scan,jooble_feed,expertini_scan,indeed_scan,instahyre_scan,devjobsscanner_scan,remoteok_feed,jobicy_feed,remote_rss_feed,reddit_feed,usajobs_feed,career_page_scan", source ) EQ 0>
+			<cfif listFindNoCase( "greenhouse,remotive_feed,arbeitnow_feed,adzuna_feed,getcfmljobs_feed,google_cse_feed,cutshort_scan,linkedin_public,foundit_scan,shine_scan,weekday_scan,jooble_feed,expertini_scan,indeed_scan,instahyre_scan,devjobsscanner_scan,remoteok_feed,jobicy_feed,remote_rss_feed,reddit_feed,usajobs_feed,career_page_scan,upwork_feed,guru_scan,arc_scan,uplers_scan", source ) EQ 0>
 				<cfset arrayAppend( summary.errors, "Skipped (unsupported source '#source#') for company #companyId# (#companyName#)" ) />
 				<cfset variables.loggerService.warn( "Skipped unsupported careers_source=#source# for company #companyId# (#companyName#)" ) />
 				<cfset incrementSourceHealth( summary.sourceHealth, source, "skipped", 0 ) />
@@ -124,6 +124,14 @@
 			<cfelseif source EQ "career_page_scan">
 					<cfset n = ingestCareerPageScan( companyId, companiesQ.careers_url[ i ], companiesQ.ats_config[ i ] ) />
 					<cfset careerScanProcessed = careerScanProcessed + 1 />
+			<cfelseif source EQ "upwork_feed">
+				<cfset n = ingestUpworkFeed( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "guru_scan">
+				<cfset n = ingestGuruScan( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "arc_scan">
+				<cfset n = ingestArcScan( companiesQ.ats_config[ i ] ) />
+			<cfelseif source EQ "uplers_scan">
+				<cfset n = ingestUplersScan( companiesQ.ats_config[ i ] ) />
 				</cfif>
 				<cfset variables.sourceQuotaService.markRun( sourceKey ) />
 				<cfset summary.jobsUpserted = summary.jobsUpserted + n />
@@ -1660,36 +1668,57 @@
 					<cfcontinue />
 				</cfcatch>
 			</cftry>
-			<cfset titles = reMatchNoCase( "base-search-card__title[^>]*>[^<]+<", htmlPage ) />
-			<cfset links = reMatchNoCase( "https://[a-z]+\.linkedin\.com/jobs/view/[^""\?\s]+", htmlPage ) />
-			<cfset locations = reMatchNoCase( "job-search-card__location[^>]*>[^<]+<", htmlPage ) />
-			<cfif NOT isArray( titles )><cfset titles = [] /></cfif>
-			<cfif NOT isArray( links )><cfset links = [] /></cfif>
-			<cfif NOT isArray( locations )><cfset locations = [] /></cfif>
-			<cfset uniqueLinks = [] />
-			<cfloop array="#links#" index="rawLink">
-				<cfset cleanLink = trim( rawLink ) />
-				<cfif NOT structKeyExists( seenLinks, cleanLink )>
-					<cfset seenLinks[ cleanLink ] = true />
-					<cfset arrayAppend( uniqueLinks, cleanLink ) />
-				</cfif>
+			<!--- Collect every job-view link with its byte position in the page. --->
+			<cfset linkHits = [] />
+			<cfset scanPos = 1 />
+			<cfloop condition="true">
+				<cfset lm = reFindNoCase( "https://[a-z]+\.linkedin\.com/jobs/view/[^""'\?\s<]+", htmlPage, scanPos, true ) />
+				<cfif NOT isArray( lm.pos ) OR lm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset arrayAppend( linkHits, { pos: lm.pos[1], url: mid( htmlPage, lm.pos[1], lm.len[1] ) } ) />
+				<cfset scanPos = lm.pos[1] + lm.len[1] />
 			</cfloop>
-			<cfloop from="1" to="#arrayLen( titles )#" index="idx">
-				<cfset rawTitle = trim( titles[ idx ] ) />
-				<cfset rawTitle = reReplace( rawTitle, "^[^>]+>", "", "all" ) />
-				<cfset rawTitle = reReplace( rawTitle, "<$", "", "all" ) />
-				<cfset rawTitle = trim( rawTitle ) />
+
+			<!--- Walk each card title and pair it with the job link from its OWN card.
+			     LinkedIn lays each card out as <a full-link href=JOB> ... <h3 title>, so the
+			     correct link is the nearest /jobs/view/ link occurring BEFORE the title.
+			     This replaces the old "zip two page-wide arrays by index" logic, which drifted
+			     out of alignment (promoted/extra anchors) and stapled a CF title onto an
+			     unrelated posting's URL. --->
+			<cfset titlePos = 1 />
+			<cfloop condition="true">
+				<cfset tm = reFindNoCase( "base-search-card__title[^>]*>[^<]+<", htmlPage, titlePos, true ) />
+				<cfif NOT isArray( tm.pos ) OR tm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset tStart = tm.pos[1] />
+				<cfset titlePos = tStart + tm.len[1] />
+				<cfset rawTitle = mid( htmlPage, tStart, tm.len[1] ) />
+				<cfset rawTitle = trim( reReplace( reReplace( rawTitle, "^[^>]+>", "", "all" ), "<$", "", "all" ) ) />
 				<cfif NOT len( rawTitle )><cfcontinue /></cfif>
+
+				<!--- nearest job link before this title = the same card's full-link anchor --->
 				<cfset jobLink = "" />
-				<cfif idx LTE arrayLen( uniqueLinks )><cfset jobLink = uniqueLinks[ idx ] /></cfif>
+				<cfset li = 0 />
+				<cfloop from="#arrayLen( linkHits )#" to="1" index="li" step="-1">
+					<cfif linkHits[ li ].pos LT tStart>
+						<cfset jobLink = linkHits[ li ].url />
+						<cfbreak />
+					</cfif>
+				</cfloop>
 				<cfif NOT len( jobLink )><cfcontinue /></cfif>
+				<cfif structKeyExists( seenLinks, jobLink )><cfcontinue /></cfif>
+				<cfset seenLinks[ jobLink ] = true />
+
+				<!--- location: first location marker at/after the title --->
 				<cfset loc = "" />
-				<cfif idx LTE arrayLen( locations )>
-					<cfset loc = trim( locations[ idx ] ) />
-					<cfset loc = reReplace( loc, "^[^>]+>", "", "all" ) />
-					<cfset loc = reReplace( loc, "<$", "", "all" ) />
-					<cfset loc = trim( loc ) />
+				<cfset locM = reFindNoCase( "job-search-card__location[^>]*>[^<]+<", htmlPage, tStart, true ) />
+				<cfif isArray( locM.pos ) AND locM.pos[1] GT 0>
+					<cfset loc = mid( htmlPage, locM.pos[1], locM.len[1] ) />
+					<cfset loc = trim( reReplace( reReplace( loc, "^[^>]+>", "", "all" ), "<$", "", "all" ) ) />
 				</cfif>
+
+				<!--- Backstop: the public scrape has no job body, so this is a title-only match.
+				     Require the link slug to corroborate ColdFusion; otherwise skip. Catches any
+				     residual title/link mismatch (e.g. a CF title pointing at a cloud-infra URL). --->
+				<cfif NOT linkSlugLooksCF( jobLink )><cfcontinue /></cfif>
 				<cfif NOT variables.scoringService.shouldPersistJob( rawTitle, "" )><cfcontinue /></cfif>
 				<cfset companyId = variables.companyService.getOrCreateExternalCompany( "LinkedIn", "" ) />
 				<cfset externalId = "linkedin-" & hash( lCase( jobLink ) ) />
@@ -1702,6 +1731,257 @@
 			<cfset variables.loggerService.info( "LinkedIn public ingest: upserted #n# job(s)." ) />
 		</cfif>
 		<cfreturn n />
+	</cffunction>
+
+	<!--- =====================================================================
+	     Apify LinkedIn-post ingest (harvestapi/linkedin-post-search, "No Cookies").
+	     Token-gated: only runs when an apify_token is supplied. LinkedIn post search
+	     ranks by RELEVANCE not date, so month-old posts slip in; we enforce recency
+	     TWICE: postedLimit in the request AND a hard maxAgeDays cutoff here, so a stale
+	     post is dropped no matter what the actor returns. Each kept post must clear a
+	     CF gate (taxonomy) AND a hiring-intent gate, and must NOT look like a candidate
+	     advertising themselves (open-to-work / bench marketing / candidate spotlight).
+	     ===================================================================== --->
+	<cffunction name="ingestApifyPosts" access="public" returntype="struct" output="false">
+		<cfargument name="token"         type="string"  required="true" />
+		<cfargument name="searchQueries" type="array"    required="false" default="#defaultApifyPostQueries()#" />
+		<cfargument name="maxPosts"      type="numeric"  required="false" default="25" />
+		<cfargument name="maxAgeDays"    type="numeric"  required="false" default="7" />
+		<cfset var out = { ok: true, fetched: 0, persisted: 0, skippedOld: 0, skippedNoCf: 0, skippedNoIntent: 0, skippedCandidate: 0, errors: [] } />
+		<cfset var tok = trim( arguments.token ) />
+		<cfif NOT len( tok )>
+			<cfreturn { ok: false, skipped: true, reason: "no apify_token configured", fetched: 0, persisted: 0 } />
+		</cfif>
+
+		<cfset var nowMs    = createObject( "java", "java.lang.System" ).currentTimeMillis() />
+		<cfset var cutoffMs = nowMs - ( arguments.maxAgeDays * 86400000 ) />
+
+		<!--- Build the body by hand: CFML serializeJSON emits whole numbers as floats (25.0),
+		     but the actor requires a strict integer for maxPosts, so inject it as int(). --->
+		<cfset var bodyJson = '{"searchQueries":' & serializeJSON( arguments.searchQueries )
+			& ',"maxPosts":' & int( arguments.maxPosts )
+			& ',"postedLimit":"week"'
+			& ',"postNestedComments":false,"postNestedReactions":false'
+			& ',"scrapeComments":false,"scrapeReactions":false}' />
+
+		<cftry>
+			<cfhttp url="https://api.apify.com/v2/acts/harvestapi~linkedin-post-search/run-sync-get-dataset-items" method="POST" result="resp" timeout="290">
+				<cfhttpparam type="header" name="Authorization" value="Bearer #tok#" />
+				<cfhttpparam type="header" name="Content-Type" value="application/json" />
+				<cfhttpparam type="body" value="#bodyJson#" />
+			</cfhttp>
+			<cfcatch type="any">
+				<cfset out.ok = false />
+				<cfset arrayAppend( out.errors, "Apify request failed: " & cfcatch.message ) />
+				<cfset variables.loggerService.error( "Apify posts request failed: " & cfcatch.message, cfcatch ) />
+				<cfreturn out />
+			</cfcatch>
+		</cftry>
+
+		<cfset var code = val( listFirst( ( structKeyExists( resp, "statusCode" ) ? resp.statusCode : "0" ) & " 0", " " ) ) />
+		<cfif code LT 200 OR code GTE 300>
+			<cfset out.ok = false />
+			<cfset arrayAppend( out.errors, "Apify HTTP " & code & ": " & left( ( structKeyExists( resp, "fileContent" ) ? resp.fileContent : "" ), 300 ) ) />
+			<cfset variables.loggerService.warn( "Apify posts HTTP " & code ) />
+			<cfreturn out />
+		</cfif>
+
+		<cftry>
+			<cfset var items = deserializeJSON( resp.fileContent ) />
+			<cfcatch type="any">
+				<cfset out.ok = false />
+				<cfset arrayAppend( out.errors, "Apify response parse error: " & cfcatch.message ) />
+				<cfreturn out />
+			</cfcatch>
+		</cftry>
+		<cfif NOT isArray( items )><cfset items = [] /></cfif>
+
+		<cfset var seen = {} />
+		<cfset var post = "" />
+		<cfloop array="#items#" index="post">
+			<cfif NOT isStruct( post )><cfcontinue /></cfif>
+			<cfset out.fetched = out.fetched + 1 />
+
+			<cfset var content = ( structKeyExists( post, "content" ) AND isSimpleValue( post.content ) ) ? trim( post.content ) : "" />
+			<cfif NOT len( content )><cfcontinue /></cfif>
+			<cfset var lc = lCase( content ) />
+
+			<!--- recency: hard cutoff on the post's own timestamp (ms) --->
+			<cfset var ts = 0 />
+			<cfif structKeyExists( post, "postedAt" ) AND isStruct( post.postedAt ) AND structKeyExists( post.postedAt, "timestamp" )>
+				<cfset ts = val( post.postedAt.timestamp ) />
+			</cfif>
+			<cfif ts LTE 0 OR ts LT cutoffMs>
+				<cfset out.skippedOld = out.skippedOld + 1 />
+				<cfcontinue />
+			</cfif>
+
+			<!--- exclude self-promotion / bench marketing / candidate spotlights --->
+			<cfif apifyLooksLikeCandidate( lc )>
+				<cfset out.skippedCandidate = out.skippedCandidate + 1 />
+				<cfcontinue />
+			</cfif>
+
+			<!--- CF gate (reuse the app taxonomy so detection stays consistent) --->
+			<cfif NOT variables.scoringService.shouldPersistJob( content, "" )>
+				<cfset out.skippedNoCf = out.skippedNoCf + 1 />
+				<cfcontinue />
+			</cfif>
+
+			<!--- hiring-intent gate --->
+			<cfif NOT apifyHasHiringIntent( lc )>
+				<cfset out.skippedNoIntent = out.skippedNoIntent + 1 />
+				<cfcontinue />
+			</cfif>
+
+			<cfset var link = ( structKeyExists( post, "linkedinUrl" ) AND isSimpleValue( post.linkedinUrl ) ) ? trim( post.linkedinUrl ) : "" />
+			<cfif NOT len( link )><cfcontinue /></cfif>
+			<cfset var postId = structKeyExists( post, "id" ) ? toString( post.id ) : hash( lCase( link ) ) />
+			<cfif structKeyExists( seen, postId )><cfcontinue /></cfif>
+			<cfset seen[ postId ] = true />
+
+			<cfset var title    = apifyPostTitle( content ) />
+			<cfset var company  = apifyPostCompany( post, content ) />
+			<cfset var loc      = apifyPostLocation( content ) />
+			<cfset var companyId = variables.companyService.getOrCreateExternalCompany( company, "" ) />
+
+			<cfset variables.jobService.upsertJob(
+				companyId  = companyId,
+				externalId = "apifypost-" & postId,
+				title      = title,
+				description = content,
+				location   = loc,
+				link       = link,
+				rawSource  = "apify_post"
+			) />
+			<cfset out.persisted = out.persisted + 1 />
+		</cfloop>
+
+		<cfset variables.loggerService.info(
+			"Apify posts ingest: fetched=" & out.fetched & " persisted=" & out.persisted
+			& " skippedOld=" & out.skippedOld & " skippedNoCf=" & out.skippedNoCf
+			& " skippedNoIntent=" & out.skippedNoIntent & " skippedCandidate=" & out.skippedCandidate
+		) />
+		<cfreturn out />
+	</cffunction>
+
+	<!--- Tuned post-search queries: pair Lucee with CF (bare "Lucee" matches Saint Lucia),
+	     and lead with recruiter-intent phrasing. Override via app.json apify.search_queries. --->
+	<cffunction name="defaultApifyPostQueries" access="private" returntype="array" output="false">
+		<cfreturn [
+			"ColdFusion developer hiring",
+			"Adobe ColdFusion developer",
+			"ColdFusion C2C",
+			"ColdFusion contract remote",
+			"CFML developer",
+			"Lucee ColdFusion developer",
+			"ColdFusion requirement"
+		] />
+	</cffunction>
+
+	<cffunction name="apifyHasHiringIntent" access="private" returntype="boolean" output="false">
+		<cfargument name="lc" type="string" required="true" />
+		<cfset var tokens = [
+			"hiring", "we are hiring", "we're hiring", "looking for", "requirement", "urgent need",
+			"immediate need", "contract", "c2c", "w2", "send your resume", "share your resume",
+			"share profiles", "resume to", "interested candidates", "job description", "now hiring",
+			"open position", "open role", "apply here", "apply via"
+		] />
+		<cfreturn postContainsAny( arguments.lc, tokens ) />
+	</cffunction>
+
+	<!--- People marketing themselves (not employers): open-to-work, bench sales, candidate spotlights. --->
+	<cffunction name="apifyLooksLikeCandidate" access="private" returntype="boolean" output="false">
+		<cfargument name="lc" type="string" required="true" />
+		<cfset var tokens = [
+			"open to work", "##opentowork", "candidate spotlight", "currently serving my notice",
+			"currently serving notice", "actively exploring new opportunities",
+			"available for permanent, contract", "if your organization is hiring or you can refer me",
+			"still searching for coldfusion developers", "i'm a freelancer merely coordinating"
+		] />
+		<cfreturn postContainsAny( arguments.lc, tokens ) />
+	</cffunction>
+
+	<cffunction name="postContainsAny" access="private" returntype="boolean" output="false">
+		<cfargument name="lc"     type="string" required="true" />
+		<cfargument name="tokens" type="array"  required="true" />
+		<cfset var t = "" />
+		<cfloop array="#arguments.tokens#" index="t">
+			<cfif len( t ) AND findNoCase( t, arguments.lc ) GT 0><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
+	</cffunction>
+
+	<!--- First meaningful line, stripped of leading emoji/symbols, capped. Prefer a line that
+	     names the role if the first line is just a banner ("We're Hiring"). --->
+	<cffunction name="apifyPostTitle" access="private" returntype="string" output="false">
+		<cfargument name="content" type="string" required="true" />
+		<cfset var lines = listToArray( arguments.content, chr(10) & chr(13) ) />
+		<cfset var roleLine = "" />
+		<cfset var firstLine = "" />
+		<cfset var ln = "" />
+		<cfset var cleaned = "" />
+		<cfloop array="#lines#" index="ln">
+			<cfset cleaned = trim( reReplace( ln, "^[^A-Za-z0-9]+", "", "all" ) ) />
+			<cfif NOT len( cleaned )><cfcontinue /></cfif>
+			<cfif NOT len( firstLine )><cfset firstLine = cleaned /></cfif>
+			<cfif NOT len( roleLine ) AND ( findNoCase( "coldfusion", cleaned ) OR findNoCase( "cfml", cleaned ) OR findNoCase( "lucee", cleaned ) OR findNoCase( "developer", cleaned ) OR findNoCase( "architect", cleaned ) OR findNoCase( "engineer", cleaned ) )>
+				<cfset roleLine = cleaned />
+			</cfif>
+		</cfloop>
+		<cfset var pick = len( roleLine ) ? roleLine : firstLine />
+		<cfif NOT len( pick )><cfset pick = "ColdFusion role" /></cfif>
+		<cfset pick = trim( reReplace( pick, "\s+", " ", "all" ) ) />
+		<cfif len( pick ) GT 160><cfset pick = left( pick, 157 ) & "..." /></cfif>
+		<cfreturn pick />
+	</cffunction>
+
+	<!--- Prefer a tagged COMPANY_NAME attribute, then a company-type author, else the recruiter. --->
+	<cffunction name="apifyPostCompany" access="private" returntype="string" output="false">
+		<cfargument name="post"    type="struct" required="true" />
+		<cfargument name="content" type="string" required="true" />
+		<cfif structKeyExists( arguments.post, "contentAttributes" ) AND isArray( arguments.post.contentAttributes )>
+			<cfset var ca = "" />
+			<cfloop array="#arguments.post.contentAttributes#" index="ca">
+				<cfif isStruct( ca ) AND structKeyExists( ca, "type" ) AND ca.type EQ "COMPANY_NAME"
+				      AND structKeyExists( ca, "company" ) AND isStruct( ca.company )
+				      AND structKeyExists( ca.company, "name" ) AND len( trim( ca.company.name ) )>
+					<cfreturn trim( ca.company.name ) />
+				</cfif>
+			</cfloop>
+		</cfif>
+		<cfif structKeyExists( arguments.post, "author" ) AND isStruct( arguments.post.author )>
+			<cfset var au = arguments.post.author />
+			<cfif structKeyExists( au, "name" ) AND len( trim( au.name ) )>
+				<cfreturn trim( au.name ) />
+			</cfif>
+		</cfif>
+		<cfreturn "LinkedIn Post" />
+	</cffunction>
+
+	<!--- Best-effort "Location: ..." extraction; safe to return empty. --->
+	<cffunction name="apifyPostLocation" access="private" returntype="string" output="false">
+		<cfargument name="content" type="string" required="true" />
+		<cfset var m = reFindNoCase( "location[^A-Za-z0-9]{0,3}([A-Za-z][^\n\r]{1,80})", arguments.content, 1, true ) />
+		<cfif isArray( m.pos ) AND arrayLen( m.pos ) GTE 2 AND m.pos[2] GT 0>
+			<cfset var loc = trim( mid( arguments.content, m.pos[2], m.len[2] ) ) />
+			<cfset loc = trim( reReplace( loc, "\s+", " ", "all" ) ) />
+			<cfreturn left( loc, 120 ) />
+		</cfif>
+		<cfreturn "" />
+	</cffunction>
+
+	<!--- LinkedIn job-view slugs are derived from the posting title, so a CF role reads like
+	     /jobs/view/coldfusion-developer-... — require that signal when we have no job body. --->
+	<cffunction name="linkSlugLooksCF" access="private" returntype="boolean" output="false">
+		<cfargument name="link" type="string" required="true" />
+		<cfset var s = lCase( arguments.link ) />
+		<cfset var tokens = [ "coldfusion", "cold-fusion", "cfml", "lucee", "coldbox", "fusebox", "wirebox", "commandbox", "adobe-cf", "/cf-" ] />
+		<cfset var t = "" />
+		<cfloop array="#tokens#" index="t">
+			<cfif findNoCase( t, s ) GT 0><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
 	</cffunction>
 
 	<!--- Foundit.in (formerly Monster India) listing scan --->
@@ -2736,4 +3016,220 @@
 		<cfargument name="careersUrl" type="string" required="true" />
 		<cfreturn variables.atsDetector.isProbableJobPostingUrl( arguments.jobUrl, arguments.careersUrl ) />
 	</cffunction>
+
+	<!--- ════════════════════════════════════════════════════════════════════════════════
+	      NEW SOURCES: Upwork · Guru · Arc.dev · Uplers
+	      ════════════════════════════════════════════════════════════════════════════════ --->
+
+	<!---
+		Upwork RSS Feed — parses Upwork's public job RSS (no auth required).
+		Feed URL: https://www.upwork.com/ab/feed/jobs/rss?q=coldfusion+developer&sort=recency
+		config keys: rss_urls (array, optional), max_runs_per_day, min_interval_minutes
+	--->
+	<cffunction name="ingestUpworkFeed" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfif structKeyExists( cfg, "rss_urls" ) AND isArray( cfg.rss_urls ) AND arrayLen( cfg.rss_urls ) GT 0>
+			<cfset rssUrls = cfg.rss_urls />
+		<cfelse>
+			<cfset rssUrls = [
+				"https://www.upwork.com/ab/feed/jobs/rss?q=coldfusion+developer&sort=recency",
+				"https://www.upwork.com/ab/feed/jobs/rss?q=cfml+OR+lucee+developer&sort=recency"
+			] />
+		</cfif>
+		<cfset n = 0 />
+		<cfset seenLinks = {} />
+		<cfloop array="#rssUrls#" index="feedUrl">
+			<cfset feedU = trim( toString( feedUrl ) ) />
+			<cfif NOT len( feedU )><cfcontinue /></cfif>
+			<cftry>
+				<cfset body = variables.httpClientService.getText( feedU, 30 ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Upwork RSS fetch failed url=#left( feedU, 120 )#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cftry>
+				<cfset xmlDoc = xmlParse( body ) />
+				<cfset itemNodes = xmlSearch( xmlDoc, "/rss/channel/item" ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Upwork RSS parse failed: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<cfif NOT isArray( itemNodes )><cfcontinue /></cfif>
+			<cfloop array="#itemNodes#" index="itemNode">
+				<cfset title = getRssXmlText( itemNode, "title" ) />
+				<cfset link  = getRssXmlText( itemNode, "link" ) />
+				<cfset desc  = getRssXmlText( itemNode, "description" ) />
+				<cfif NOT len( trim( link ) ) OR structKeyExists( seenLinks, link )><cfcontinue /></cfif>
+				<cfset seenLinks[ link ] = true />
+				<cfif NOT len( trim( title ) )><cfcontinue /></cfif>
+				<cfset descPlain = trim( reReplace( reReplace( desc, "<[^>]+>", " ", "all" ), "\s+", " ", "all" ) ) />
+				<cfif NOT variables.scoringService.shouldPersistJob( title, descPlain )><cfcontinue /></cfif>
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( "Upwork", "https://www.upwork.com" ) />
+				<cfset externalId = "upwork-" & hash( lCase( link ) ) />
+				<cfset variables.jobService.upsertJob( companyId=companyId, externalId=externalId, title=title, description=left( descPlain, 12000 ), location="Remote", link=link, rawSource="upwork" ) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( 600 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Upwork feed ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!---
+		Guru HTML Scan — scrapes Guru.com job search for ColdFusion postings.
+		Target: https://www.guru.com/d/jobs/q/coldfusion/
+		config keys: search_urls (array, optional)
+	--->
+	<cffunction name="ingestGuruScan" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfif structKeyExists( cfg, "search_urls" ) AND isArray( cfg.search_urls ) AND arrayLen( cfg.search_urls ) GT 0>
+			<cfset searchUrls = cfg.search_urls />
+		<cfelse>
+			<cfset searchUrls = [
+				"https://www.guru.com/d/jobs/q/coldfusion/",
+				"https://www.guru.com/d/jobs/q/cfml/"
+			] />
+		</cfif>
+		<cfset n = 0 />
+		<cfset seenLinks = {} />
+		<cfloop array="#searchUrls#" index="searchUrl">
+			<cfset su = trim( toString( searchUrl ) ) />
+			<cfif NOT len( su )><cfcontinue /></cfif>
+			<cftry>
+				<cfset html = variables.httpClientService.getText( su, 30 ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Guru scan fetch failed url=#left( su, 120 )#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<!--- Guru job links: /d/jobs/id/NNNNN/... --->
+			<cfset scanPos = 1 />
+			<cfloop condition="true">
+				<cfset lm = reFindNoCase( "href=""(/d/jobs/[^""]+)""[^>]*>[^<]*<[^>]+>\s*([^<]{5,120})", html, scanPos, true ) />
+				<cfif NOT isArray( lm.pos ) OR arrayLen( lm.pos ) LT 3 OR lm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset rawPath  = mid( html, lm.pos[2], lm.len[2] ) />
+				<cfset rawTitle = trim( reReplace( mid( html, lm.pos[3], lm.len[3] ), "<[^>]+>", "", "all" ) ) />
+				<cfset scanPos  = lm.pos[1] + lm.len[1] />
+				<cfif NOT len( rawTitle ) OR NOT len( rawPath )><cfcontinue /></cfif>
+				<cfset jobLink = "https://www.guru.com" & rawPath />
+				<cfif structKeyExists( seenLinks, jobLink )><cfcontinue /></cfif>
+				<cfset seenLinks[ jobLink ] = true />
+				<cfif NOT variables.scoringService.shouldPersistJob( rawTitle, "" )><cfcontinue /></cfif>
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( "Guru", "https://www.guru.com" ) />
+				<cfset externalId = "guru-" & hash( lCase( jobLink ) ) />
+				<cfset variables.jobService.upsertJob( companyId=companyId, externalId=externalId, title=rawTitle, description="", location="Remote", link=jobLink, rawSource="guru" ) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( 800 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Guru scan ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!---
+		Arc.dev HTML Scan — scrapes Arc.dev remote job listings for ColdFusion.
+		Target: https://arc.dev/remote-jobs/coldfusion
+		config keys: search_urls (array, optional)
+	--->
+	<cffunction name="ingestArcScan" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfif structKeyExists( cfg, "search_urls" ) AND isArray( cfg.search_urls ) AND arrayLen( cfg.search_urls ) GT 0>
+			<cfset searchUrls = cfg.search_urls />
+		<cfelse>
+			<cfset searchUrls = [
+				"https://arc.dev/remote-jobs/coldfusion",
+				"https://arc.dev/remote-jobs/cfml"
+			] />
+		</cfif>
+		<cfset n = 0 />
+		<cfset seenLinks = {} />
+		<cfloop array="#searchUrls#" index="searchUrl">
+			<cfset su = trim( toString( searchUrl ) ) />
+			<cfif NOT len( su )><cfcontinue /></cfif>
+			<cftry>
+				<cfset html = variables.httpClientService.getText( su, 30 ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Arc.dev scan fetch failed url=#left( su, 120 )#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<!--- Arc job links: /remote-jobs/SLUG or /jobs/SLUG --->
+			<cfset scanPos = 1 />
+			<cfloop condition="true">
+				<cfset lm = reFindNoCase( "href=""(https://arc\.dev/(?:remote-jobs|jobs)/[^""]+)""[^>]*>[^<]*</?[^>]+>\s*([^<]{5,120})", html, scanPos, true ) />
+				<cfif NOT isArray( lm.pos ) OR arrayLen( lm.pos ) LT 3 OR lm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset jobLink  = mid( html, lm.pos[2], lm.len[2] ) />
+				<cfset rawTitle = trim( reReplace( mid( html, lm.pos[3], lm.len[3] ), "<[^>]+>", "", "all" ) ) />
+				<cfset scanPos  = lm.pos[1] + lm.len[1] />
+				<cfif NOT len( rawTitle ) OR NOT len( jobLink )><cfcontinue /></cfif>
+				<cfif structKeyExists( seenLinks, jobLink )><cfcontinue /></cfif>
+				<cfset seenLinks[ jobLink ] = true />
+				<cfif NOT variables.scoringService.shouldPersistJob( rawTitle, "" )><cfcontinue /></cfif>
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( "Arc.dev", "https://arc.dev" ) />
+				<cfset externalId = "arc-" & hash( lCase( jobLink ) ) />
+				<cfset variables.jobService.upsertJob( companyId=companyId, externalId=externalId, title=rawTitle, description="", location="Remote", link=jobLink, rawSource="arc" ) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( 800 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Arc.dev scan ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
+	<!---
+		Uplers HTML Scan — scrapes Uplers job board for ColdFusion / CFML roles.
+		Target: https://www.uplers.com/jobs/?s=coldfusion
+		config keys: search_urls (array, optional)
+	--->
+	<cffunction name="ingestUplersScan" access="private" returntype="numeric" output="false">
+		<cfargument name="atsConfigJson" type="string" required="true" />
+		<cfset cfg = parseConfig( arguments.atsConfigJson ) />
+		<cfif structKeyExists( cfg, "search_urls" ) AND isArray( cfg.search_urls ) AND arrayLen( cfg.search_urls ) GT 0>
+			<cfset searchUrls = cfg.search_urls />
+		<cfelse>
+			<cfset searchUrls = [
+				"https://www.uplers.com/jobs/?s=coldfusion",
+				"https://www.uplers.com/jobs/?s=cfml"
+			] />
+		</cfif>
+		<cfset n = 0 />
+		<cfset seenLinks = {} />
+		<cfloop array="#searchUrls#" index="searchUrl">
+			<cfset su = trim( toString( searchUrl ) ) />
+			<cfif NOT len( su )><cfcontinue /></cfif>
+			<cftry>
+				<cfset html = variables.httpClientService.getText( su, 30 ) />
+				<cfcatch type="any">
+					<cfset variables.loggerService.warn( "Uplers scan fetch failed url=#left( su, 120 )#: #cfcatch.message#" ) />
+					<cfcontinue />
+				</cfcatch>
+			</cftry>
+			<!--- Uplers job card link pattern --->
+			<cfset scanPos = 1 />
+			<cfloop condition="true">
+				<cfset lm = reFindNoCase( "href=""(https://www\.uplers\.com/(?:jobs|job|career|opening)[^""]+)""[^>]*>\s*<[^>]+>\s*([^<]{5,120})", html, scanPos, true ) />
+				<cfif NOT isArray( lm.pos ) OR arrayLen( lm.pos ) LT 3 OR lm.pos[1] LTE 0><cfbreak /></cfif>
+				<cfset jobLink  = mid( html, lm.pos[2], lm.len[2] ) />
+				<cfset rawTitle = trim( reReplace( mid( html, lm.pos[3], lm.len[3] ), "<[^>]+>", "", "all" ) ) />
+				<cfset scanPos  = lm.pos[1] + lm.len[1] />
+				<cfif NOT len( rawTitle ) OR NOT len( jobLink )><cfcontinue /></cfif>
+				<cfif structKeyExists( seenLinks, jobLink )><cfcontinue /></cfif>
+				<cfset seenLinks[ jobLink ] = true />
+				<cfif NOT variables.scoringService.shouldPersistJob( rawTitle, "" )><cfcontinue /></cfif>
+				<cfset companyId = variables.companyService.getOrCreateExternalCompany( "Uplers", "https://www.uplers.com" ) />
+				<cfset externalId = "uplers-" & hash( lCase( jobLink ) ) />
+				<cfset variables.jobService.upsertJob( companyId=companyId, externalId=externalId, title=rawTitle, description="", location="Remote / India", link=jobLink, rawSource="uplers" ) />
+				<cfset n = n + 1 />
+			</cfloop>
+			<cfset sleepMs( 800 ) />
+		</cfloop>
+		<cfif n GT 0><cfset variables.loggerService.info( "Uplers scan ingest: upserted #n# job(s)." ) /></cfif>
+		<cfreturn n />
+	</cffunction>
+
 </cfcomponent>

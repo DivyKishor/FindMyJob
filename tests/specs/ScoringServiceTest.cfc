@@ -8,8 +8,8 @@
 				variables.svc = new services.ScoringService();
 			});
 
-			it( "uses the v5_layered rule version", function(){
-				expect( variables.svc.getRuleVersion() ).toBe( "v5_layered" );
+			it( "uses the v7_sponsor_negation rule version", function(){
+				expect( variables.svc.getRuleVersion() ).toBe( "v7_sponsor_negation" );
 			});
 
 			it( "scores ColdBox / CommandBox / WireBox roles", function(){

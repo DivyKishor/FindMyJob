@@ -1,6 +1,6 @@
 <cfcomponent output="false" accessors="true">
 	<!---
-		ScoringService — Phase 2, PR 2.3 update (v5_layered).
+		ScoringService — v6_sponsor_aware (Phase 2 + post-demo refinement).
 
 		Composes four independent scoring layers so each concern is testable in isolation:
 
@@ -8,7 +8,9 @@
 		  geo_eligibility  Geography / work-auth check (was classifyIndiaEligibility).
 		                     yes→+50  likely→+30  likely_no→0  no→−30  unknown→0
 		  remote_fit       Explicit remote-work signal bonus.                    0 or +10
-		  visa_sponsorship Employer explicitly offers visa sponsorship.          0 or +15
+		  visa_sponsorship Employer explicitly offers visa sponsorship.          0 or +20
+		                     If present, it OVERRIDES the geo work-auth penalty
+		                     (a sponsoring US role is a top match, not a blocked one).
 		  ─────────────────────────────────────────────────────────────────────────────
 		  Total capped 0–100.  Alert threshold: ≥ 70.
 
@@ -32,8 +34,9 @@
 		<cfelse>
 			<cfset variables.taxonomy = createObject( "component", "services.TechTaxonomy" ).init() />
 		</cfif>
-		<!--- v5: adds remote_fit + visa_sponsorship layers on top of v4 cf_ecosystem scoring. --->
-		<cfset variables.ruleVersion      = "v5_layered" />
+		<!--- v6: visa sponsorship now OVERRIDES the work-auth penalty (a sponsoring US role
+		     is a top result for someone who needs sponsorship), and weighs more (+20). --->
+		<cfset variables.ruleVersion      = "v7_sponsor_negation" />
 		<cfset variables.directKeywords   = variables.taxonomy.allAliases() />
 		<cfset variables.fullStackSignals = [ "full stack", "fullstack", "full-stack" ] />
 		<cfset variables.backendCfPairs   = variables.taxonomy.allAliases() />
@@ -61,15 +64,37 @@
 			"security clearance required", "secret clearance", "top secret", "public trust clearance",
 			"australian citizen", "right to work in australia",
 			"right to work in the uk", "right to work in canada",
-			"eu work permit", "european work authorization"
+			"eu work permit", "european work authorization",
+			"without employer sponsorship", "without sponsorship", "no visa sponsorship",
+			"no employer sponsorship", "permanent resident", "us permanent resident"
 		] />
 
-		<!--- Explicit visa-sponsorship positive signals. --->
+		<!--- Explicit visa-sponsorship positive signals.
+		     Deliberately VISA-specific: bare "we sponsor"/"will sponsor"/"sponsorship available"
+		     are excluded because they also match non-visa sponsorship (e.g. "we sponsor
+		     employees for Security Clearance"). --->
 		<cfset variables.sponsorPositives = [
-			"visa sponsorship", "visa sponsor", "h-1b sponsorship", "h1b sponsorship",
-			"h-1b sponsor", "h1b sponsor", "will sponsor", "we sponsor",
-			"sponsorship available", "sponsoring h1b", "sponsoring visa",
-			"visa support provided", "sponsor work visa", "able to sponsor"
+			"visa sponsorship", "visa sponsor", "sponsor visa", "sponsor a visa",
+			"sponsor work visa", "work visa sponsorship", "sponsoring visa",
+			"will sponsor visa", "we sponsor visa", "able to sponsor visa", "can sponsor visa",
+			"provide visa sponsorship", "offer visa sponsorship", "visa support provided",
+			"h-1b sponsorship", "h1b sponsorship", "h-1b sponsor", "h1b sponsor",
+			"sponsor h-1b", "sponsor h1b", "sponsoring h-1b", "sponsoring h1b",
+			"green card sponsorship", "immigration sponsorship", "employment-based visa"
+		] />
+
+		<!--- Negative sponsorship phrases. These contain the word "sponsorship" but mean the
+		     OPPOSITE (no sponsorship). Checked BEFORE positives so "no H-1B sponsorship" /
+		     "without employer sponsorship" are never counted as a positive, and they also
+		     mark the role as work-auth restricted. --->
+		<cfset variables.sponsorNegatives = [
+			"without employer sponsorship", "without sponsorship", "without need for sponsorship",
+			"without requiring sponsorship", "no visa sponsorship", "no employer sponsorship",
+			"no sponsorship", "not provide sponsorship", "does not provide sponsorship",
+			"do not provide sponsorship", "not offer sponsorship", "does not offer sponsorship",
+			"unable to sponsor", "not able to sponsor", "are not able to sponsor",
+			"will not sponsor", "cannot sponsor", "can not sponsor", "not sponsor",
+			"sponsorship is not available", "sponsorship not available", "no h-1b sponsorship", "no h1b sponsorship"
 		] />
 
 		<cfreturn this />
@@ -108,6 +133,10 @@
 			} />
 		</cfif>
 
+		<!--- Visa sponsorship is computed first because it overrides the work-auth penalty. --->
+		<cfset var visaBonus = classifyVisaSponsorship( text ) />
+		<cfset var hasSponsor = ( visaBonus GT 0 ) />
+
 		<!--- Layer 2: geo_eligibility (formerly classifyIndiaEligibility). --->
 		<cfset var geoResult = classifyGeoEligibility( text, locText ) />
 		<cfif geoResult EQ "yes">
@@ -117,8 +146,13 @@
 			<cfset s = s + 30 />
 			<cfset arrayAppend( reasons, "india_likely" ) />
 		<cfelseif geoResult EQ "no">
-			<cfset s = s - 30 />
-			<cfset arrayAppend( reasons, "work_auth_restricted" ) />
+			<cfif hasSponsor>
+				<!--- Employer sponsors a visa, so the work-auth restriction does not block this seeker. --->
+				<cfset arrayAppend( reasons, "work_auth_offset_by_sponsorship" ) />
+			<cfelse>
+				<cfset s = s - 30 />
+				<cfset arrayAppend( reasons, "work_auth_restricted" ) />
+			</cfif>
 		</cfif>
 
 		<!--- Layer 3: remote_fit — additive +10 for any explicit remote signal. --->
@@ -128,9 +162,8 @@
 			<cfset arrayAppend( reasons, "remote_fit:+" & remoteBonus ) />
 		</cfif>
 
-		<!--- Layer 4: visa_sponsorship — additive +15 if employer explicitly sponsors. --->
-		<cfset var visaBonus = classifyVisaSponsorship( text ) />
-		<cfif visaBonus GT 0>
+		<!--- Layer 4: visa_sponsorship — strong additive (+20); a sponsoring role is a top match. --->
+		<cfif hasSponsor>
 			<cfset s = s + visaBonus />
 			<cfset arrayAppend( reasons, "visa_sponsorship:+" & visaBonus ) />
 		</cfif>
@@ -234,13 +267,18 @@
 
 	<!---
 		classifyVisaSponsorship — bonus when the employer explicitly offers visa sponsorship.
-		Returns: 15 if positive sponsorship language found, 0 otherwise.
+		Returns: 20 if positive sponsorship language found, 0 otherwise.
+		Negative phrases ("no/without ... sponsorship") are checked first and force 0.
 	--->
 	<cffunction name="classifyVisaSponsorship" access="public" returntype="numeric" output="false">
 		<cfargument name="jobText" type="string" required="true" />
 		<cfset var t = lCase( trim( arguments.jobText ) ) />
+		<!--- Negatives win: "no H-1B sponsorship" must NOT count as sponsorship. --->
+		<cfloop array="#variables.sponsorNegatives#" index="neg">
+			<cfif findNoCase( neg, t ) GT 0><cfreturn 0 /></cfif>
+		</cfloop>
 		<cfloop array="#variables.sponsorPositives#" index="sp">
-			<cfif findNoCase( sp, t ) GT 0><cfreturn 15 /></cfif>
+			<cfif findNoCase( sp, t ) GT 0><cfreturn 20 /></cfif>
 		</cfloop>
 		<cfreturn 0 />
 	</cffunction>

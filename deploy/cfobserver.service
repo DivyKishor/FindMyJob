@@ -1,0 +1,23 @@
+[Unit]
+Description=CF/OBSERVER (Lucee via CommandBox)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cfobserver
+Group=cfobserver
+WorkingDirectory=/opt/cfobserver
+Environment=HOME=/opt/cfobserver
+Environment=BOX_HOME=/opt/cfobserver/.commandbox
+# Foreground start so systemd supervises the JVM directly.
+ExecStart=/usr/local/bin/box server start serverConfigFile=/opt/cfobserver/deploy/server.json --console
+ExecStop=/usr/local/bin/box server stop serverConfigFile=/opt/cfobserver/deploy/server.json
+Restart=on-failure
+RestartSec=10
+# Give the JVM time to boot/stop.
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

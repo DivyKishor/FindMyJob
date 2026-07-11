@@ -90,6 +90,8 @@
 		<cfargument name="locationKeyword" type="string" required="false" default="" />
 		<cfargument name="rawSource" type="string" required="false" default="" />
 		<cfargument name="workType" type="string" required="false" default="" />
+		<cfargument name="sponsorshipOnly" type="boolean" required="false" default="false" />
+		<cfargument name="newWithinHours" type="numeric" required="false" default="0" />
 
 		<cfif arguments.page LT 1><cfset arguments.page = 1 /></cfif>
 		<cfif arguments.pageSize LT 1><cfset arguments.pageSize = 25 /></cfif>
@@ -97,6 +99,7 @@
 
 		<cfset sortMap = {
 			"fetched_at": "j.fetched_at",
+			"first_seen": "COALESCE(j.first_seen_at, j.fetched_at)",
 			"title": "j.title",
 			"location": "j.location",
 			"company_name": "c.name",
@@ -109,9 +112,14 @@
 		<cfset safeSortDir = lCase( arguments.sortDir ) />
 		<cfif safeSortDir NEQ "asc"><cfset safeSortDir = "desc" /></cfif>
 
+		<!--- Join each job's LATEST score row (any rule_version) so the board never breaks
+		     when the scoring rule version is bumped before a re-score has run. --->
 		<cfset fromSql = " FROM jobs j INNER JOIN companies c ON c.id = j.company_id
-			LEFT JOIN job_scores js ON js.job_id = j.id AND js.rule_version = ? WHERE 1=1" />
-		<cfset params = [ { value: variables.jobScoreRuleVersion, cfsqltype: "cf_sql_varchar" } ] />
+			LEFT JOIN job_scores js ON js.id = (
+				SELECT jsx.id FROM job_scores jsx WHERE jsx.job_id = j.id
+				ORDER BY jsx.created_at DESC, jsx.id DESC LIMIT 1
+			) WHERE 1=1" />
+		<cfset params = [] />
 
 		<cfif arguments.companyId GT 0>
 			<cfset fromSql = fromSql & " AND j.company_id = ?" />
@@ -132,6 +140,13 @@
 		<cfif arguments.minScore GT 0>
 			<cfset fromSql = fromSql & " AND COALESCE(js.score, 0) >= ?" />
 			<cfset arrayAppend( params, { value: arguments.minScore, cfsqltype: "cf_sql_integer" } ) />
+		</cfif>
+		<cfif arguments.sponsorshipOnly>
+			<cfset fromSql = fromSql & " AND js.reasons_json LIKE '%visa_sponsorship%'" />
+		</cfif>
+		<cfif arguments.newWithinHours GT 0>
+			<cfset fromSql = fromSql & " AND COALESCE(j.first_seen_at, j.fetched_at) >= datetime('now', ?)" />
+			<cfset arrayAppend( params, { value: "-" & int( arguments.newWithinHours ) & " hours", cfsqltype: "cf_sql_varchar" } ) />
 		</cfif>
 		<cfif len( trim( arguments.locationKeyword ) )>
 			<cfset locKw = lCase( trim( arguments.locationKeyword ) ) />
@@ -213,10 +228,11 @@
 		<cfset offsetRows = ( arguments.page - 1 ) * arguments.pageSize />
 
 		<cfset dataSql = "SELECT j.id, j.company_id, j.external_id, j.title, j.description, j.location, j.link, j.raw_source, j.fetched_at,
+		                         COALESCE(j.first_seen_at, j.fetched_at) AS first_seen_at,
 		                         COALESCE(j.work_type, 'unknown') AS work_type, COALESCE(j.is_active, 1) AS is_active,
-		                         c.name AS company_name, COALESCE(js.score, 0) AS score" &
+		                         c.name AS company_name, COALESCE(js.score, 0) AS score, js.reasons_json" &
 			fromSql &
-			" ORDER BY " & sortMap[ safeSortBy ] & " " & safeSortDir & ", j.id DESC LIMIT ? OFFSET ?" />
+			" ORDER BY " & sortMap[ safeSortBy ] & " " & safeSortDir & ", COALESCE(j.first_seen_at, j.fetched_at) DESC, j.id DESC LIMIT ? OFFSET ?" />
 
 		<cfset dataParams = duplicate( params ) />
 		<cfset arrayAppend( dataParams, { value: arguments.pageSize, cfsqltype: "cf_sql_integer" } ) />
@@ -226,6 +242,10 @@
 		<cfset rows = variables.databaseService.queryToArray( q ) />
 		<cfloop array="#rows#" index="rowItem">
 			<cfset rowItem.score = val( rowItem.score ) />
+			<!--- Expose v5 scoring reasons (cf_tech, remote_fit, visa_sponsorship, india_eligible, ...). --->
+			<cfset rowItem.reasons = parseReasonsList( structKeyExists( rowItem, "reasons_json" ) ? rowItem.reasons_json : "" ) />
+			<cfif structKeyExists( rowItem, "reasons_json" )><cfset structDelete( rowItem, "reasons_json" ) /></cfif>
+			<cfset rowItem.has_sponsorship = reasonsContain( rowItem.reasons, "visa_sponsorship" ) />
 		</cfloop>
 
 		<cfreturn {
@@ -237,6 +257,29 @@
 			sortBy: safeSortBy,
 			sortDir: safeSortDir
 		} />
+	</cffunction>
+
+	<!--- Parse a job_scores.reasons_json string into an array (empty array on null/bad JSON). --->
+	<cffunction name="parseReasonsList" access="private" returntype="array" output="false">
+		<cfargument name="reasonsJson" type="any" required="true" />
+		<cfif isSimpleValue( arguments.reasonsJson ) AND len( trim( arguments.reasonsJson ) )>
+			<cftry>
+				<cfset var parsed = deserializeJSON( arguments.reasonsJson ) />
+				<cfif isArray( parsed )><cfreturn parsed /></cfif>
+				<cfcatch type="any"><cfreturn [] /></cfcatch>
+			</cftry>
+		</cfif>
+		<cfreturn [] />
+	</cffunction>
+
+	<cffunction name="reasonsContain" access="private" returntype="boolean" output="false">
+		<cfargument name="reasons" type="array" required="true" />
+		<cfargument name="needle" type="string" required="true" />
+		<cfset var r = "" />
+		<cfloop array="#arguments.reasons#" index="r">
+			<cfif findNoCase( arguments.needle, r ) GT 0><cfreturn true /></cfif>
+		</cfloop>
+		<cfreturn false />
 	</cffunction>
 
 	<cffunction name="upsertJob" access="public" returntype="void" output="false">
