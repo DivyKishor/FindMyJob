@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#4d7cfe" />
+<title>Observer — the jobs the big boards can't show you</title>
+<style>
+	:root{
+		--bg:#ffffff; --bg2:#f5f7fc; --ink:#0b1020; --muted:#5b6478;
+		--accent:#4d7cfe; --accent2:#7c5cff; --line:#e7ebf3;
+		--ring:rgba(77,124,254,.18); --shadow:0 12px 40px rgba(20,28,60,.08);
+		--radius:16px;
+	}
+	*{box-sizing:border-box}
+	html,body{margin:0;padding:0}
+	body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
+	a{color:inherit;text-decoration:none}
+	.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+	.em{font-style:italic;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+	.btn{display:inline-block;font-weight:600;border-radius:999px;padding:13px 24px;transition:.15s;border:1px solid transparent;cursor:pointer;font-size:15px}
+	.btn-primary{background:var(--accent);color:#fff;box-shadow:0 6px 18px var(--ring)}
+	.btn-primary:hover{transform:translateY(-1px);box-shadow:0 10px 26px var(--ring)}
+	.btn-ghost{background:#fff;border-color:var(--line);color:var(--ink)}
+	.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+	/* nav */
+	nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(10px);background:rgba(255,255,255,.75);border-bottom:1px solid var(--line)}
+	nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+	.logo{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:-.02em}
+	.logo .dot{width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 0 0 4px var(--ring)}
+	.navlinks{display:flex;gap:26px;color:var(--muted);font-size:14px;font-weight:500}
+	.navlinks a:hover{color:var(--ink)}
+	@media(max-width:760px){.navlinks{display:none}}
+
+	/* hero */
+	.hero{position:relative;overflow:hidden;background:radial-gradient(1200px 600px at 70% -10%,#eef2ff 0%,#fff 60%)}
+	#bg{position:absolute;inset:0;width:100%;height:100%;display:block}
+	.hero .wrap{position:relative;z-index:2;padding:96px 24px 88px;text-align:center}
+	.pill-tag{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--accent);background:#eef2ff;border:1px solid #dfe6ff;padding:6px 14px;border-radius:999px;margin-bottom:22px}
+	h1{font-size:clamp(38px,6vw,68px);line-height:1.03;letter-spacing:-.03em;font-weight:800;margin:0 0 18px}
+	.sub{font-size:clamp(17px,2.2vw,21px);color:var(--muted);max-width:640px;margin:0 auto 30px}
+	.cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+	.chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+	.chip{font-size:13px;font-weight:600;color:#3a4256;background:#fff;border:1px solid var(--line);padding:7px 13px;border-radius:999px;box-shadow:var(--shadow)}
+	.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+	/* sections */
+	section{padding:84px 0}
+	.eyebrow{color:var(--accent);font-weight:700;font-size:13px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
+	h2{font-size:clamp(28px,4vw,40px);letter-spacing:-.02em;font-weight:800;margin:0 0 14px}
+	.lead{color:var(--muted);font-size:18px;max-width:620px}
+	.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+	@media(max-width:820px){.grid3{grid-template-columns:1fr}}
+	.card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:26px;box-shadow:var(--shadow)}
+	.card .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:#eef2ff;margin-bottom:16px;font-size:22px}
+	.card h3{margin:0 0 8px;font-size:19px;letter-spacing:-.01em}
+	.card p{margin:0;color:var(--muted);font-size:15px}
+
+	.alt{background:var(--bg2)}
+	.split{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+	@media(max-width:820px){.split{grid-template-columns:1fr}}
+	.steps{list-style:none;margin:26px 0 0;padding:0;display:grid;gap:14px}
+	.steps li{display:flex;gap:14px;align-items:flex-start}
+	.steps .n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px}
+	.steps b{display:block;font-size:16px}
+	.steps span{color:var(--muted);font-size:14.5px}
+	.panel{background:#0b1020;border-radius:20px;padding:22px;box-shadow:var(--shadow);color:#dbe2f2;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.7}
+	.panel .k{color:#7c8db5}.panel .g{color:#5be39b}.panel .a{color:#8fb4ff}.panel .y{color:#e3c15b}
+
+	.sources{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:36px}
+	@media(max-width:820px){.sources{grid-template-columns:1fr}}
+	.src{display:flex;gap:14px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+	.src .ic{font-size:20px}.src b{font-size:15px}.src p{margin:3px 0 0;color:var(--muted);font-size:14px}
+
+	.stackstrip{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:26px}
+	.stackstrip span{font-weight:700;color:#8b93a7;font-size:15px;border:1px solid var(--line);border-radius:10px;padding:8px 14px;background:#fff}
+
+	.ctaband{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;border-radius:24px;padding:56px 40px;text-align:center;box-shadow:0 20px 50px var(--ring)}
+	.ctaband h2{color:#fff}.ctaband p{color:#e7ecff;max-width:520px;margin:0 auto 26px;font-size:17px}
+	.ctaband .btn-primary{background:#fff;color:var(--accent)}
+
+	footer{border-top:1px solid var(--line);padding:40px 0;color:var(--muted);font-size:14px}
+	footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+	<div class="logo"><span class="dot"></span>Observer</div>
+	<div class="navlinks">
+		<a href="#how">How it works</a>
+		<a href="#sources">Sources</a>
+		<a href="#sponsor">Sponsorship</a>
+		<a href="index.cfm">Live board</a>
+	</div>
+	<a class="btn btn-primary" href="#start">Get started</a>
+</div></nav>
+
+<header class="hero">
+	<canvas id="bg"></canvas>
+	<div class="wrap">
+		<div class="pill-tag">● Now indexing hidden roles in real time</div>
+		<h1>The jobs the big boards<br><span class="em">can't</span> show you.</h1>
+		<p class="sub">Pick your stack — even the obscure ones. We surface hidden roles from recruiter posts, the GitHub dev-graph, and niche boards no aggregator indexes — and flag exactly who sponsors visas.</p>
+		<div class="cta-row">
+			<a class="btn btn-primary" href="#start">Find hidden jobs</a>
+			<a class="btn btn-ghost" href="#how">See how it works</a>
+		</div>
+		<div class="chips" id="chips"></div>
+	</div>
+</header>
+
+<!-- value trio -->
+<section><div class="wrap">
+	<div class="eyebrow">Why Observer</div>
+	<h2>Three things aggregators <span class="em">get wrong</span>.</h2>
+	<p class="lead">Big boards optimize for volume and popular stacks. That buries exactly the roles niche engineers want.</p>
+	<div class="grid3">
+		<div class="card"><div class="ic">🕵️</div><h3>Hidden roles, surfaced</h3><p>Recruiter LinkedIn posts, C2C threads, and company pages that never hit Indeed or LinkedIn search.</p></div>
+		<div class="card"><div class="ic">🛂</div><h3>Who actually sponsors</h3><p>Filter to employers that publish visa sponsorship — the highest-intent signal, made a first-class filter.</p></div>
+		<div class="card"><div class="ic">⏱️</div><h3>Fresh &amp; de-noised</h3><p>Postings ≤7 days old, scored to strip bench-marketing, spam, and "still hiring?" reposts.</p></div>
+	</div>
+</div></section>
+
+<!-- how it works -->
+<section class="alt" id="how"><div class="wrap"><div class="split">
+	<div>
+		<div class="eyebrow">How it works</div>
+		<h2>Pick a stack. Get the roles <span class="em">nobody else lists</span>.</h2>
+		<p class="lead">Tell us what you build (or want to build next). We do the digging.</p>
+		<ul class="steps">
+			<li><span class="n">1</span><div><b>Choose your stack</b><span>ColdFusion, Lucee, Perl, COBOL, Elixir, VB.NET — legacy and niche welcome.</span></div></li>
+			<li><span class="n">2</span><div><b>We crawl the edges</b><span>Recruiter posts, the CFML/OSS dev-graph, and boards aggregators skip.</span></div></li>
+			<li><span class="n">3</span><div><b>Score, sponsor-flag, alert</b><span>Ranked by fit, tagged for visa sponsorship, delivered fresh.</span></div></li>
+		</ul>
+	</div>
+	<div class="panel">
+<span class="k"># observer feed — coldfusion + sponsors</span><br>
+<span class="a">Senior ColdFusion Dev</span>  <span class="g">· sponsors ✓</span><br>
+&nbsp;&nbsp;Albany, NY · C2C · <span class="y">2d ago</span><br>
+<span class="a">Lucee Product Engineer</span> <span class="g">· sponsors ✓</span><br>
+&nbsp;&nbsp;Remote (EU) · full-time · <span class="y">4d ago</span><br>
+<span class="a">Perl / CFML Modernizer</span><br>
+&nbsp;&nbsp;Denver · contract · <span class="y">1d ago</span><br>
+<span class="k"># 133 noise posts filtered · 22 kept</span>
+	</div>
+</div></div></section>
+
+<!-- sources -->
+<section id="sources"><div class="wrap">
+	<div class="eyebrow">The moat</div>
+	<h2>Sources the aggregators <span class="em">don't read</span>.</h2>
+	<p class="lead">Two discovery engines feed one board — one finds employers by their web/stack footprint, the other by who actually writes the code.</p>
+	<div class="sources">
+		<div class="src"><div class="ic">💬</div><div><b>Recruiter &amp; C2C posts</b><p>Fresh LinkedIn hiring posts pulled and de-spammed — roles that only ever live in someone's feed.</p></div></div>
+		<div class="src"><div class="ic">🐙</div><div><b>GitHub dev-graph</b><p>We find companies by the developers committing to CFML/OSS repos, then gate to real employers.</p></div></div>
+		<div class="src"><div class="ic">🌐</div><div><b>Stack-footprint search</b><p>"Powered by Lucee", "builtwith ColdFusion", gov ".cfm" — the web's tells for who runs your stack.</p></div></div>
+		<div class="src"><div class="ic">📮</div><div><b>Niche &amp; regional boards</b><p>Small boards and feeds the big players never bother to index.</p></div></div>
+	</div>
+</div></section>
+
+<!-- sponsorship band -->
+<section class="alt" id="sponsor"><div class="wrap"><div class="split">
+	<div class="panel" style="background:linear-gradient(135deg,#141a33,#0b1020)">
+<span class="k"># filter: sponsors_visa = true</span><br>
+<span class="g">✓</span> Silvervine Software  <span class="k">· H-1B history</span><br>
+<span class="g">✓</span> ADL Group (AU)       <span class="k">· 482 visa</span><br>
+<span class="g">✓</span> Mindbank             <span class="k">· green-card track</span><br>
+<span class="k"># 3 of 22 flagged as sponsors this week</span>
+	</div>
+	<div>
+		<div class="eyebrow">Sponsorship</div>
+		<h2>Stop guessing <span class="em">who'll sponsor</span>.</h2>
+		<p class="lead">The single hardest thing to find on any job board, made a one-click filter. We surface employers that publish sponsorship — visa type and history where we can find it.</p>
+		<a class="btn btn-primary" href="#start" style="margin-top:22px">Show me sponsors</a>
+	</div>
+</div></div></section>
+
+<!-- stack strip -->
+<section><div class="wrap" style="text-align:center">
+	<div class="eyebrow" style="text-align:center">Built for niche stacks first</div>
+	<h2>Where "no aggregator has this" is <span class="em">actually true</span>.</h2>
+	<div class="stackstrip">
+		<span>ColdFusion</span><span>Lucee</span><span>CFML</span><span>Perl</span><span>COBOL</span><span>VB.NET</span><span>Elixir</span><span>ColdBox</span><span>Fusebox</span><span>Delphi</span>
+	</div>
+</div></section>
+
+<!-- final cta -->
+<section id="start"><div class="wrap">
+	<div class="ctaband">
+		<h2>Find the role that isn't on Indeed.</h2>
+		<p>Pick your stack, flip on sponsorship, and get fresh hidden jobs — before anyone else sees them.</p>
+		<a class="btn btn-primary" href="index.cfm">Open the live board →</a>
+	</div>
+</div></section>
+
+<footer><div class="wrap">
+	<div class="logo"><span class="dot"></span>Observer</div>
+	<div>Hidden jobs for niche stacks · visa-sponsorship flags · fresh ≤7 days</div>
+</div></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+	// interactive stack chips
+	const stacks=['ColdFusion','Lucee','Perl','COBOL','Elixir','VB.NET','ColdBox'];
+	const chips=document.getElementById('chips');
+	stacks.forEach((s,i)=>{const c=document.createElement('span');c.className='chip'+(i===0?' on':'');c.textContent=s;
+		c.onclick=()=>c.classList.toggle('on');chips.appendChild(c);});
+
+	// three.js dev-graph network behind the hero
+	(function(){
+		const canvas=document.getElementById('bg');
+		const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
+		renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+		const scene=new THREE.Scene();
+		const cam=new THREE.PerspectiveCamera(60,1,0.1,100);cam.position.z=26;
+
+		const N=90, R=18, pos=[];
+		const g=new THREE.BufferGeometry();
+		const arr=new Float32Array(N*3);
+		for(let i=0;i<N;i++){
+			const v=new THREE.Vector3(
+				(Math.random()-.5)*R*2,(Math.random()-.5)*R*1.3,(Math.random()-.5)*R*1.4);
+			pos.push(v);arr[i*3]=v.x;arr[i*3+1]=v.y;arr[i*3+2]=v.z;
+		}
+		g.setAttribute('position',new THREE.BufferAttribute(arr,3));
+		const nodes=new THREE.Points(g,new THREE.PointsMaterial({color:0x4d7cfe,size:.42,transparent:true,opacity:.9}));
+		scene.add(nodes);
+
+		// links between near nodes
+		const lp=[];
+		for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){
+			if(pos[i].distanceTo(pos[j])<5.2){lp.push(pos[i].x,pos[i].y,pos[i].z,pos[j].x,pos[j].y,pos[j].z);}
+		}
+		const lg=new THREE.BufferGeometry();
+		lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(lp),3));
+		const lines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x7c5cff,transparent:true,opacity:.18}));
+		scene.add(lines);
+
+		const grp=new THREE.Group();grp.add(nodes);grp.add(lines);scene.add(grp);
+		let mx=0,my=0;
+		window.addEventListener('mousemove',e=>{mx=(e.clientX/window.innerWidth-.5);my=(e.clientY/window.innerHeight-.5);});
+
+		function size(){const h=canvas.parentElement;renderer.setSize(h.clientWidth,h.clientHeight,false);
+			cam.aspect=h.clientWidth/h.clientHeight;cam.updateProjectionMatrix();}
+		window.addEventListener('resize',size);size();
+
+		(function loop(t){requestAnimationFrame(loop);
+			grp.rotation.y=t*0.00006+mx*0.5;grp.rotation.x=my*0.35;
+			renderer.render(scene,cam);})(0);
+	})();
+</script>
+</body>
+</html>
