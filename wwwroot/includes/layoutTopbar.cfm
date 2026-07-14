@@ -2,14 +2,17 @@
 <cfparam name="activeSection" default="today" />
 <cfparam name="unreadAlerts" default="0" />
 
+<cfparam name="isLocal" default="false" />
 <cfset navLinks = [
 	{ id: "today", label: "Today", href: indexUrl },
 	{ id: "board", label: "Board", href: indexUrl & "##board" },
 	{ id: "companies", label: "Companies", href: indexUrl & "##companies" },
-	{ id: "alerts", label: "Alerts", href: indexUrl & "##alerts" },
-	{ id: "pipeline", label: "Pipeline", href: indexUrl & "##pipeline" },
-	{ id: "network", label: "Network", href: discoveryUrl }
+	{ id: "alerts", label: "Alerts", href: indexUrl & "##alerts" }
 ] />
+<cfif isLocal>
+	<cfset arrayAppend( navLinks, { id: "pipeline", label: "Pipeline", href: indexUrl & "##pipeline" } ) />
+	<cfset arrayAppend( navLinks, { id: "network", label: "Network", href: discoveryUrl } ) />
+</cfif>
 
 <cfoutput>
 <header class="fp-nav">

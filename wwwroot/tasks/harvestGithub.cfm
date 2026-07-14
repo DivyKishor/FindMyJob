@@ -15,4 +15,9 @@
 		companiesUpserted: summary.companiesUpserted,
 		companiesGated: summary.companiesGated,
 		errors: summary.errors
-	} )
+	} )#</cfoutput>
+	<cfcatch type="any">
+		<cfheader statusCode="500" />
+		<cfoutput>#serializeJSON( { ok: false, error: cfcatch.message } )#</cfoutput>
+	</cfcatch>
+</cftry>

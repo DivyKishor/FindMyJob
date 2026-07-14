@@ -7,9 +7,11 @@
 <cfparam name="url.company_id" default="0" />
 <cfparam name="url.jobs_page" default="1" />
 <cfparam name="url.jobs_page_size" default="25" />
-<cfparam name="url.jobs_sort_by" default="score" />
+<cfparam name="url.jobs_sort_by" default="first_seen" />
 <cfparam name="url.jobs_sort_dir" default="desc" />
 <cfparam name="url.new_since" default="24" />
+<cfparam name="url.sponsorship" default="0" />
+<cfparam name="url.new_today" default="0" />
 <cfparam name="url.work_type" default="" />
 <cfparam name="url.alerts_page" default="1" />
 <cfparam name="url.alerts_page_size" default="25" />
@@ -33,6 +35,13 @@
 <cfif NOT listFind( "6,24,48,168", newSince )><cfset newSince = 24 /></cfif>
 <cfset workTypeFilter = lCase( trim( url.work_type ) ) />
 <cfif NOT listFind( ",remote,hybrid,onsite,unknown", workTypeFilter )><cfset workTypeFilter = "" /></cfif>
+<cfset sponsorshipOnly = ( val( url.sponsorship ) EQ 1 ) />
+<cfset newTodayHours = ( val( url.new_today ) EQ 1 ) ? 24 : 0 />
+<!--- The "new today" view is about recency, so order by most-recently-found. --->
+<cfif newTodayHours GT 0>
+	<cfset jobsSortBy = "first_seen" />
+	<cfset jobsSortDir = "desc" />
+</cfif>
 <cfset alertsPage = val( url.alerts_page ) />
 <cfset alertsPageSize = val( url.alerts_page_size ) />
 <cfset alertsSortBy = lCase( url.alerts_sort_by ) />
@@ -49,6 +58,13 @@
 <cfif alertsPageSize LT 1><cfset alertsPageSize = 25 /></cfif>
 <cfif companiesPageSize LT 1><cfset companiesPageSize = 25 /></cfif>
 
+<!--- Admin visibility: only show admin controls (Run now, Pipeline nav) when accessing directly from localhost.
+     Ngrok forwards via localhost so REMOTE_ADDR is 127.0.0.1 even for public visitors — check X-Forwarded-For to detect proxy. --->
+<cfset isLocal = (
+    ( CGI.REMOTE_ADDR EQ "127.0.0.1" OR CGI.REMOTE_ADDR EQ "::1" OR CGI.REMOTE_ADDR EQ "0:0:0:0:0:0:0:1" )
+    AND NOT len( trim( CGI.HTTP_X_FORWARDED_FOR ) )
+) />
+
 <cfinclude template="includes/pathUtil.cfm" />
 
 <cfset runInfo = {} />
@@ -60,7 +76,7 @@
 	<cfset companiesData = application.companyService.listPaged( companiesSortBy, companiesSortDir, companiesPage, companiesPageSize ) />
 	<cfset companies = companiesData.rows />
 	<cfset companiesForFilter = application.companyService.listWithJobsForFilter() />
-	<cfset jobsData = application.jobService.listPaged( companyId, keyword, minScore, jobsPage, jobsPageSize, jobsSortBy, jobsSortDir, locationKeyword, rawSourceFilter, workTypeFilter ) />
+	<cfset jobsData = application.jobService.listPaged( companyId, keyword, minScore, jobsPage, jobsPageSize, jobsSortBy, jobsSortDir, locationKeyword, rawSourceFilter, workTypeFilter, sponsorshipOnly, newTodayHours ) />
 	<cfset alertsData = application.alertService.listAlertsPaged( alertsPage, alertsPageSize, alertsSortBy, alertsSortDir ) />
 	<cfset runInfo = application.runStatusService.getLatestRun() />
 	<cfset pipelinePhases = application.runStatusService.getPipelinePhaseRows( runInfo ) />
@@ -167,10 +183,23 @@
 	<cfargument name="wt" type="string" required="true" />
 	<cfargument name="sb" type="string" required="true" />
 	<cfargument name="sd" type="string" required="true" />
+		<cfargument name="spOverride" type="string" required="false" default="" />
+		<cfargument name="ntOverride" type="string" required="false" default="" />
+		<cfset var spOn = false />
+		<cfif arguments.spOverride EQ "1"><cfset spOn = true />
+		<cfelseif arguments.spOverride EQ "0"><cfset spOn = false />
+		<cfelse><cfset spOn = ( structKeyExists( variables, "sponsorshipOnly" ) AND variables.sponsorshipOnly ) /></cfif>
+		<cfset var ntOn = false />
+		<cfif arguments.ntOverride EQ "1"><cfset ntOn = true />
+		<cfelseif arguments.ntOverride EQ "0"><cfset ntOn = false />
+		<cfelse><cfset ntOn = ( structKeyExists( variables, "newTodayHours" ) AND variables.newTodayHours GT 0 ) /></cfif>
+		<cfset var extra = "" />
+		<cfif spOn><cfset extra = extra & "&sponsorship=1" /></cfif>
+		<cfif ntOn><cfset extra = extra & "&new_today=1" /></cfif>
 	<cfreturn arguments.base & "?keyword=" & urlEncodedFormat( arguments.kw ) & "&location=" & urlEncodedFormat( arguments.loc )
 		& "&min_score=" & arguments.ms & "&source=" & urlEncodedFormat( arguments.src ) & "&company_id=" & arguments.cid
 		& "&work_type=" & urlEncodedFormat( arguments.wt ) & "&jobs_sort_by=" & urlEncodedFormat( arguments.sb )
-		& "&jobs_sort_dir=" & urlEncodedFormat( arguments.sd ) & "&jobs_page=1##board" />
+		& "&jobs_sort_dir=" & urlEncodedFormat( arguments.sd ) & "&jobs_page=1" & extra & "##board" />
 </cffunction>
 
 <!--- Renders a single job card (Briefing + Board use this). --->
@@ -183,7 +212,7 @@
 	<cfset var workLabel = work EQ "unknown" ? "unclassified" : work />
 	<cfset var href = jobHref( j.link ) />
 	<cfset var summary = structKeyExists( j, "description" ) ? plainSummary( j.description, 150 ) : "" />
-	<cfset var ageStr = structKeyExists( j, "fetched_at" ) ? relAge( j.fetched_at ) : "" />
+	<cfset var ageStr = structKeyExists( j, "first_seen_at" ) ? relAge( j.first_seen_at ) : ( structKeyExists( j, "fetched_at" ) ? relAge( j.fetched_at ) : "" ) />
 	<cfset var loc = len( trim( j.location ) ) ? j.location : "Location n/a" />
 	<cfset var badgePx = arguments.big ? 60 : 50 />
 	<cfset var expired = structKeyExists( j, "is_active" ) AND NOT val( j.is_active ) />
@@ -191,13 +220,25 @@
 	<cfoutput>
 	<a class="fp-card fp-click fp-job-card<cfif arguments.big> fp-job-card--big</cfif>" style="text-decoration:none;color:inherit;"<cfif len( href )> href="#encodeForHTMLAttribute( href )#" target="_blank" rel="noopener noreferrer"<cfelse> href="##" onclick="return false;"</cfif>>
 		<div class="fp-job-card-top">
-			<span class="fp-kick fp-work-pill<cfif work EQ 'remote'> fp-work-pill--remote</cfif>">#encodeForHTML( workLabel )#</span>
+			<cfif work NEQ "unknown"><span class="fp-kick fp-work-pill<cfif work EQ 'remote'> fp-work-pill--remote</cfif>">#encodeForHTML( workLabel )#</span><cfelse><span></span></cfif>
+			<cfif structKeyExists( j, "has_sponsorship" ) AND j.has_sponsorship>
+				<span class="fp-kick" style="background:##0f3a25;color:##5be39b;border:1px solid ##1d6b46;margin-left:6px;">SPONSORSHIP</span>
+			</cfif>
 			<div class="fp-badge #scoreToneClass( score )#" style="width:#badgePx#px;height:#badgePx#px;">
 				<span class="fp-badge-num" style="font-size:#( arguments.big ? 22 : 18 )#px;">#score#</span>
 				<span class="fp-badge-lbl" style="font-size:#( arguments.big ? 8 : 7 )#px;">MATCH</span>
 			</div>
 		</div>
 		<h3 class="fp-disp">#encodeForHTML( j.title )#</h3>
+			<cfif structKeyExists( j, "reasons" ) AND isArray( j.reasons ) AND arrayLen( j.reasons )>
+				<cfset var rsnStr = lCase( arrayToList( j.reasons, "|" ) ) />
+				<cfif findNoCase( "india_eligible", rsnStr ) OR findNoCase( "remote_fit", rsnStr )>
+					<div style="margin-top:3px;line-height:1;">
+						<cfif findNoCase( "india_eligible", rsnStr )><span class="fp-kick" style="font-size:9px;margin-right:5px;">INDIA</span></cfif>
+						<cfif findNoCase( "remote_fit", rsnStr )><span class="fp-kick" style="font-size:9px;">REMOTE</span></cfif>
+					</div>
+				</cfif>
+			</cfif>
 		<cfif arguments.big AND len( summary )><p class="fp-summary">#encodeForHTML( summary )#</p></cfif>
 		<div class="fp-job-card-bottom">
 			<div style="min-width:0;">
@@ -351,11 +392,26 @@
 		<a class="fp-chip" href="#boardUrl( indexUrl, keyword, 'india-eligible', 70, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir )#">India-eligible &##10003;</a>
 		</cfif>
 
+		<span class="fp-filterbar-divider"></span>
+
+		<!--- Sponsorship toggle — boardUrl injects the flag into the query (preserves New-today). --->
+		<cfif sponsorshipOnly>
+		<a class="fp-chip fp-chip--on" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir, '0' )#">Sponsorship &##10003;</a>
+		<cfelse>
+		<a class="fp-chip" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir, '1' )#">Sponsorship</a>
+		</cfif>
+		<!--- New-today toggle (preserves an active Sponsorship flag via the inherit default). --->
+		<cfif newTodayHours GT 0>
+		<a class="fp-chip fp-chip--on" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir, '', '0' )#">New today &##10003;</a>
+		<cfelse>
+		<a class="fp-chip" href="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, jobsData.sortBy, jobsData.sortDir, '', '1' )#">New today</a>
+		</cfif>
+
 		<div class="fp-filterbar-spacer"></div>
 		<span class="fp-kick" style="color:var(--fp-mute);">#numberFormat( jobsData.totalRows, ',' )# of #numberFormat( totalJobsInDb, ',' )#</span>
 		<select class="fp-in" style="width:auto;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:11px;" onchange="location.href=this.value;">
 			<option value="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, 'score', 'desc' )#"<cfif jobsData.sortBy EQ 'score'> selected</cfif>>Sort: match score</option>
-			<option value="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, 'fetched_at', 'desc' )#"<cfif jobsData.sortBy EQ 'fetched_at'> selected</cfif>>Sort: newest</option>
+			<option value="#boardUrl( indexUrl, keyword, locationKeyword, minScore, rawSourceFilter, companyId, workTypeFilter, 'first_seen', 'desc' )#"<cfif jobsData.sortBy EQ 'first_seen'> selected</cfif>>Sort: newest</option>
 		</select>
 	</div>
 </div>
@@ -503,7 +559,7 @@
 				</div>
 			</div>
 		</div>
-		<a class="fp-btn fp-btn--accent" href="#appBasePath#tasks/runDailyScrape.cfm">Run now &rarr;</a>
+		<cfif isLocal><a class="fp-btn fp-btn--accent" href="#appBasePath#tasks/runDailyScrape.cfm">Run now &rarr;</a></cfif>
 	</div>
 
 	<cfif arrayLen( pipelinePhases ) EQ 0>

@@ -44,6 +44,11 @@
 		<cfset arrayAppend( variables.channels, arguments.channel ) />
 	</cffunction>
 
+	<!--- Registered channels (used by the alert-channels operator page + test task). --->
+	<cffunction name="getChannels" access="public" returntype="array" output="false">
+		<cfreturn variables.channels />
+	</cffunction>
+
 	<cffunction name="ds" access="private" returntype="string" output="false">
 		<cfreturn variables.databaseService.getDatasource() />
 	</cffunction>

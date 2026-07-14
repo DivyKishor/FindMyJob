@@ -228,6 +228,7 @@
 		<cfset offsetRows = ( arguments.page - 1 ) * arguments.pageSize />
 
 		<cfset dataSql = "SELECT j.id, j.company_id, j.external_id, j.title, j.description, j.location, j.link, j.raw_source, j.fetched_at,
+		                         COALESCE(j.first_seen_at, j.fetched_at) AS first_seen_at,
 		                         COALESCE(j.work_type, 'unknown') AS work_type, COALESCE(j.is_active, 1) AS is_active,
 		                         c.name AS company_name, COALESCE(js.score, 0) AS score, js.reasons_json" &
 			fromSql &

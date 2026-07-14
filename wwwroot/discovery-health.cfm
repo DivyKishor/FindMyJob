@@ -63,7 +63,7 @@
 </head>
 <body>
 	<h1>Discovery Engine Health</h1>
-	<div class="sub">How well the autonomous discovery is finding CF/Lucee companies &amp; signals. <a href="index.cfm">&larr; Dashboard</a> &middot; <a href="discovery-signals.cfm">Signals feed</a></div>
+	<div class="sub">How well the autonomous discovery is finding CF/Lucee companies &amp; signals. <a href="index.cfm">&larr; Dashboard</a> &middot; <a href="discovered-companies.cfm">Discovered companies</a> &middot; <a href="discovery-signals.cfm">Signals feed</a></div>
 
 	<h2>Signals discovered</h2>
 	<div class="stats">
@@ -116,10 +116,4 @@
 				<td><span class="pill">#encodeForHTML( sg.signal_type )#</span></td>
 				<td>#encodeForHTML( len( trim( sg.company_name ) ) ? sg.company_name : sg.company_domain )#</td>
 				<td>#val( sg.confidence_score )#</td>
-				<td>#encodeForHTML( sg.created_at )#</td>
-			</tr>
-		</cfloop>
-	</table>
-</body>
-</html>
-</cfoutput>
+				<td>#encodeForHTML( sg.created_at )#</t

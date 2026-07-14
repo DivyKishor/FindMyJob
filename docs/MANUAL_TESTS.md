@@ -70,6 +70,40 @@ Pass = matches "Expected". If anything deviates, note the URL + `wwwroot/logs/sc
 
 ---
 
+## Phase 3
+
+### MT‑11 — Source-graph migrations + backfill (PR 3.1)
+**Steps:** `/index.cfm?reinit=1`, then `/tasks/buildSourceGraph.cfm`.
+**Expected:** `{ ok:true, nodes:N }` with N ≥ 1. In DB Browser: tables `sources`, `source_edges`, `source_metrics`, `source_definitions` exist; `sources` has one row per distinct `careers_source`.
+
+### MT‑12 — Config-driven onboarding (PR 3.3)
+**Steps:** `/tasks/syncSourceDefinitions.cfm?source_key=acme_scan&adapter_kind=career_page_scan&label=Acme&url=https://acme.com/careers`. Run it twice.
+**Expected:** First call `onboarded` includes `acme_scan`; a `companies` row exists with `careers_url=https://acme.com/careers` and `careers_source=career_page_scan`; `sources` has an `acme_scan` node with `status='candidate'`. Second call returns `onboarded:[]` (no duplicate).
+
+### MT‑13 — Expansion engine (PR 3.2)
+**Steps:** In DB Browser, give the candidate proven yield (simulate metrics):
+`INSERT INTO source_metrics (source_key,runs,companies_found,jobs_found,yield_score) VALUES ('acme_scan',3,3,0,1.0);`
+Then `/tasks/expandSources.cfm`.
+**Expected:** `{ ok:true, promoted:["acme_scan"], ... }`; `sources.status` for `acme_scan` becomes `active`. A zero-yield active source (`runs≥3, yield_score=0`) would appear under `quarantined`.
+
+### MT‑14 — Tiered scheduler (PR 3.4)
+**Steps:** Covered deterministically by `SourceSchedulerTest` (run the suite). Optional: confirm via behaviour that a freshly-run hot source is not re-selected immediately.
+**Expected:** Hot sources due after ~6h, warm ~1d, cold ~7d; never-run sources always due.
+
+## Phase 4 (UI)
+
+### MT‑15 — Alert channels page renders + status (PR 4.1–4.3)
+**Steps:** open `/alert-channels.cfm`.
+**Expected:** Three cards — **telegram**, **whatsapp** (each CONFIGURED or NOT CONFIGURED depending on creds), and **log** (ALWAYS ON). A "Recent deliveries" table lists alerts by channel. With no creds set, telegram/whatsapp show NOT CONFIGURED and their test buttons are disabled.
+
+### MT‑16 — Send a test alert from the UI (PR 4.1/4.2)
+**Steps:** set Telegram creds (see `DEPLOY_PHASE4.md`), `/index.cfm?reinit=1`, reopen `/alert-channels.cfm`, click **Send test alert** under telegram.
+**Expected:** the inline result shows `{ "ok":true, "enabled":true, "result":{ "sent":true } }` and the message arrives in your Telegram chat. Re-clicking re-sends (test path is non-persisted). Same flow for WhatsApp once its creds + 24h window are set.
+
+### MT‑17 — Pipeline delivery + dedupe
+**Steps:** with a channel configured, run `/tasks/generateAlerts.cfm`.
+**Expected:** `channelResults` includes `{channel:"telegram", sent:true}` for qualifying jobs (score ≥ the channel's min). Re-running does **not** resend (deduped via the `alerts` table); the `alerts` table shows `channel='telegram'` rows.
+
 ## Quick pass/fail summary to record
 
 | ID | Area | Pass? |
@@ -84,3 +118,10 @@ Pass = matches "Expected". If anything deviates, note the URL + `wwwroot/logs/sc
 | MT‑8 | Remote/visa layers | |
 | MT‑9 | Alert channels | |
 | MT‑10 | Full pipeline | |
+| MT‑11 | Source graph + backfill | |
+| MT‑12 | Config onboarding | |
+| MT‑13 | Expansion engine | |
+| MT‑14 | Tiered scheduler | |
+| MT‑15 | Channels page + status | |
+| MT‑16 | UI test send | |
+| MT‑17 | Pipeline delivery + dedupe | |

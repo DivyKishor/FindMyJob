@@ -11,6 +11,9 @@ coldfusion_intel.db
 # Real config with secrets (use app.example.json as the template)
 wwwroot/config/app.json
 
+# DuckDNS token (use deploy/duckdns.env.example as the template)
+deploy/duckdns.env
+
 # Test runtime artifacts
 tests/results/
 .testbox/

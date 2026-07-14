@@ -3980,7 +3980,7 @@
         "lucee",
         "cold fusion"
       ],
-      "note": "University job board \u2014 requires login; monitor via Bing RSS site: queries"
+      "note": "University job board — requires login; monitor via Bing RSS site: queries"
     }
   },
   {
@@ -4060,7 +4060,7 @@
     "careers_url": "https://www.usajobs.gov/search/results/?k=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Federal government CF jobs \u2014 resume: State of Oregon DHS sector"
+    "notes": "Federal government CF jobs — resume: State of Oregon DHS sector"
   },
   {
     "name": "GovernmentJobs.com (ColdFusion)",
@@ -4068,7 +4068,7 @@
     "careers_url": "https://www.governmentjobs.com/careers/search?keyword=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "State/county gov CF jobs \u2014 resume: Oregon DHS, Washington County Oregon"
+    "notes": "State/county gov CF jobs — resume: Oregon DHS, Washington County Oregon"
   },
   {
     "name": "Wells Fargo Careers",
@@ -4076,7 +4076,7 @@
     "careers_url": "https://www.wellsfargojobs.com/search-jobs/?keyword=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Banking sector CF jobs \u2014 resume: Wells Fargo relocation contracts system"
+    "notes": "Banking sector CF jobs — resume: Wells Fargo relocation contracts system"
   },
   {
     "name": "GE Vernova / GE Aerospace Careers",
@@ -4084,7 +4084,7 @@
     "careers_url": "https://jobs.gecareers.com/global/en/search-results?keywords=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Industrial/utilities CF jobs \u2014 resume: UTC & FS (GE division) fire safety"
+    "notes": "Industrial/utilities CF jobs — resume: UTC & FS (GE division) fire safety"
   },
   {
     "name": "Idealist (Nonprofit/Gov CF)",
@@ -4092,7 +4092,7 @@
     "careers_url": "https://www.idealist.org/en/jobs?q=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Nonprofit/public sector CF jobs \u2014 resume: Oregon DHS refugee admin"
+    "notes": "Nonprofit/public sector CF jobs — resume: Oregon DHS refugee admin"
   },
   {
     "name": "Dice (Insurance/Finance CF)",
@@ -4100,7 +4100,7 @@
     "careers_url": "https://www.dice.com/jobs?q=coldfusion+insurance",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Tech-focused job board \u2014 insurance/finance CF \u2014 resume: Cornerstone Operations Group"
+    "notes": "Tech-focused job board — insurance/finance CF — resume: Cornerstone Operations Group"
   },
   {
     "name": "Remotive (ColdFusion)",
@@ -4108,7 +4108,7 @@
     "careers_url": "https://remotive.com/remote-jobs/software-dev?search=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Remote job board \u2014 CF filter"
+    "notes": "Remote job board — CF filter"
   },
   {
     "name": "Remote4Me (ColdFusion)",
@@ -4116,7 +4116,7 @@
     "careers_url": "https://remote4me.com/?search=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Remote job aggregator \u2014 CF filter"
+    "notes": "Remote job aggregator — CF filter"
   },
   {
     "name": "Remotees (ColdFusion)",
@@ -4124,7 +4124,7 @@
     "careers_url": "https://remotees.com/?s=coldfusion",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "Remote job board \u2014 CF filter"
+    "notes": "Remote job board — CF filter"
   },
   {
     "name": "RemoteOK (ColdFusion)",
@@ -4132,7 +4132,7 @@
     "careers_url": "https://remoteok.com/remote-coldfusion-jobs",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "High-traffic remote board \u2014 CF tag"
+    "notes": "High-traffic remote board — CF tag"
   },
   {
     "name": "RemoteOK Europe (ColdFusion)",
@@ -4140,7 +4140,7 @@
     "careers_url": "https://remoteok.com/remote-coldfusion-jobs?location=Europe",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "RemoteOK Europe region \u2014 CF filter"
+    "notes": "RemoteOK Europe region — CF filter"
   },
   {
     "name": "RemoteOK Asia (ColdFusion)",
@@ -4148,7 +4148,7 @@
     "careers_url": "https://remoteok.com/remote-coldfusion-jobs?location=Asia",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "RemoteOK Asia region \u2014 CF filter"
+    "notes": "RemoteOK Asia region — CF filter"
   },
   {
     "name": "PALADEM",
@@ -4156,7 +4156,7 @@
     "careers_url": "https://www.paladem.com",
     "careers_source": "custom",
     "ats_config": {},
-    "notes": "CFML Slack #jobs May 28 \u2014 US remote part-time/1099 CF dev. Contact Scott Bennett via DM."
+    "notes": "CFML Slack #jobs May 28 — US remote part-time/1099 CF dev. Contact Scott Bennett via DM."
   },
   {
     "name": "Nextron",
@@ -4164,7 +4164,7 @@
     "careers_url": "https://www.nextron.ch/en/",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 CF dev since 1998, Switzerland/Germany/Austria web agency."
+    "notes": "Adobe CF Development Partner — CF dev since 1998, Switzerland/Germany/Austria web agency."
   },
   {
     "name": "Pillar Software Developers",
@@ -4172,7 +4172,7 @@
     "careers_url": "https://www.pillardevelopers.com/",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 custom enterprise apps in CF, React, .NET, Python. US."
+    "notes": "Adobe CF Development Partner — custom enterprise apps in CF, React, .NET, Python. US."
   },
   {
     "name": "Techleadz",
@@ -4180,7 +4180,7 @@
     "careers_url": "https://www.techleadz.com",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 premier CF consulting firm, 10+ years, web/mobile dev."
+    "notes": "Adobe CF Development Partner — premier CF consulting firm, 10+ years, web/mobile dev."
   },
   {
     "name": "Octadyne Systems",
@@ -4188,7 +4188,7 @@
     "careers_url": "https://www.octadyne.com",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 20+ years CF dev, hosting, AWS/Azure app management."
+    "notes": "Adobe CF Development Partner — 20+ years CF dev, hosting, AWS/Azure app management."
   },
   {
     "name": "EcomSolutions",
@@ -4196,7 +4196,7 @@
     "careers_url": "https://www.ecomsolutions.net",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 NY-based CF engineering firm since 2003, finance/healthcare/retail."
+    "notes": "Adobe CF Development Partner — NY-based CF engineering firm since 2003, finance/healthcare/retail."
   },
   {
     "name": "WRIS Web Services",
@@ -4204,7 +4204,7 @@
     "careers_url": "https://wris.com/",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 CF solutions since 1996, North America/Europe, fully remote team."
+    "notes": "Adobe CF Development Partner — CF solutions since 1996, North America/Europe, fully remote team."
   },
   {
     "name": "Thin Air Web",
@@ -4212,7 +4212,7 @@
     "careers_url": "https://thinairweb.com/",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 CF business software since 2005, SMBs, US/Canada."
+    "notes": "Adobe CF Development Partner — CF business software since 2005, SMBs, US/Canada."
   },
   {
     "name": "DAStek Softwares",
@@ -4220,6 +4220,67 @@
     "careers_url": "https://dasteksoftwares.com/",
     "careers_source": "career_page_scan",
     "ats_config": {},
-    "notes": "Adobe CF Development Partner \u2014 CF on AWS/Azure/GCP, 100+ projects delivered."
+    "notes": "Adobe CF Development Partner — CF on AWS/Azure/GCP, 100+ projects delivered."
+  },
+  {
+    "name": "Upwork Feed",
+    "website": "https://www.upwork.com",
+    "careers_url": "https://www.upwork.com/ab/feed/jobs/rss?q=coldfusion+developer&sort=recency",
+    "careers_source": "upwork_feed",
+    "ats_config": {
+      "max_runs_per_day": 4,
+      "min_interval_minutes": 240,
+      "rss_urls": [
+        "https://www.upwork.com/ab/feed/jobs/rss?q=coldfusion+developer&sort=recency",
+        "https://www.upwork.com/ab/feed/jobs/rss?q=cfml+developer&sort=recency",
+        "https://www.upwork.com/ab/feed/jobs/rss?q=lucee+developer&sort=recency"
+      ]
+    },
+    "notes": "Upwork public RSS — no auth required; returns recent CF/CFML/Lucee freelance postings."
+  },
+  {
+    "name": "Guru Scan",
+    "website": "https://www.guru.com",
+    "careers_url": "https://www.guru.com/d/jobs/q/coldfusion/",
+    "careers_source": "guru_scan",
+    "ats_config": {
+      "max_runs_per_day": 2,
+      "min_interval_minutes": 360,
+      "search_urls": [
+        "https://www.guru.com/d/jobs/q/coldfusion/",
+        "https://www.guru.com/d/jobs/q/cfml/"
+      ]
+    },
+    "notes": "Guru.com HTML scrape for ColdFusion / CFML freelance jobs."
+  },
+  {
+    "name": "Arc.dev Scan",
+    "website": "https://arc.dev",
+    "careers_url": "https://arc.dev/remote-jobs/coldfusion",
+    "careers_source": "arc_scan",
+    "ats_config": {
+      "max_runs_per_day": 2,
+      "min_interval_minutes": 360,
+      "search_urls": [
+        "https://arc.dev/remote-jobs/coldfusion",
+        "https://arc.dev/remote-jobs/cfml"
+      ]
+    },
+    "notes": "Arc.dev remote job board — HTML scrape for CF/CFML listings."
+  },
+  {
+    "name": "Uplers Scan",
+    "website": "https://www.uplers.com",
+    "careers_url": "https://www.uplers.com/jobs/?s=coldfusion",
+    "careers_source": "uplers_scan",
+    "ats_config": {
+      "max_runs_per_day": 2,
+      "min_interval_minutes": 360,
+      "search_urls": [
+        "https://www.uplers.com/jobs/?s=coldfusion",
+        "https://www.uplers.com/jobs/?s=cfml"
+      ]
+    },
+    "notes": "Uplers job board — India-focused remote roles; HTML scrape for CF/CFML."
   }
 ]

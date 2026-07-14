@@ -74,6 +74,14 @@
 			application.databaseService,
 			application.loggerService
 		) />
+
+		<!--- Phase 4 Telegram + WhatsApp alert channels DISABLED.
+		     WhatsApp token returned 401 (expired) and Telegram timed out (408), so they errored on
+		     every alert. The log channel (wired below at PR 2.4) still records alerts to the DB.
+		     To re-enable: restore the createObject + addChannel calls and refresh tokens in app.json.
+		--->
+		<!--- <cfset application.telegramChannel = createObject("component", "services.TelegramChannel").init(...) /> + addChannel --->
+		<!--- <cfset application.whatsappChannel = createObject("component", "services.WhatsAppChannel").init(...) /> + addChannel --->
 		<cfset application.httpClientService = createObject("component", "services.HttpClientService").init() />
 		<cfset application.greenhouseParser = createObject("component", "services.GreenhouseParser").init() />
 		<cfset application.discoveryService = createObject("component", "services.DiscoveryService").init(
@@ -194,7 +202,8 @@
 			{ name: "CF_Observer_Company_Score",  path: "/tasks/scoreCompanies.cfm",            time: "02:45 AM", interval: "daily" },
 			{ name: "CF_Observer_Expiry_Check",   path: "/tasks/checkJobExpiry.cfm?limit=60&min_days=7", time: "03:15 AM", interval: "259200" },
 			{ name: "CF_Observer_Source_Expand",  path: "/tasks/expandSources.cfm",             time: "04:00 AM", interval: "604800" },
-			{ name: "CF_Observer_Github",         path: "/tasks/harvestGithub.cfm?max=60",      time: "04:30 AM", interval: "604800" }
+			{ name: "CF_Observer_Github",         path: "/tasks/harvestGithub.cfm?max=60",      time: "04:30 AM", interval: "604800" },
+			{ name: "CF_Observer_Apify_Posts",    path: "/tasks/harvestApifyPosts.cfm",        time: "05:00 AM", interval: "daily" }
 		] />
 
 		<cfloop array="#jobs#" index="jobDef">
@@ -225,20 +234,26 @@
 		</cfif>
 		<cfset application.databaseService.ensureForeignKeys() />
 
-		<!--- Secret-key guard for /tasks/ endpoints. Only enforced when security.task_key
-		     is configured (env CFINTEL_SECURITY_TASK_KEY or config/app.json), so local
-		     dev stays open while public hosting can lock task triggers down. --->
-		<cfif findNoCase( "/tasks/", arguments.targetPage ) GT 0>
-			<cfset var taskKey = structKeyExists( application, "appConfig" ) ? trim( application.appConfig.get( "security.task_key", "" ) ) : "" />
-			<cfif len( taskKey )>
-				<cfset var provided = ( structKeyExists( url, "key" ) AND isSimpleValue( url.key ) ) ? trim( url.key ) : "" />
-				<cfif provided NEQ taskKey>
-					<cfheader statusCode="403" />
-					<cfcontent type="application/json; charset=utf-8" />
-					<cfoutput>#serializeJSON( { ok: false, error: "Forbidden: missing or invalid task key" } )#</cfoutput>
-					<cfabort />
-				</cfif>
-			</cfif>
-		</cfif>
-	</cffunction>
-</cfcomponent>
+		<!--- Guard /tasks/ endpoints. These are triggered by the in-process scheduler, which
+		     calls http://127.0.0.1:8888/tasks/... directly (NOT through the public reverse
+		     proxy). So by default we accept a task request ONLY when it is BOTH from loopback
+		     AND not carrying proxy headers (X-Forwarded-For / X-Real-IP) — i.e. it came from
+		     the box itself, not a public visitor proxied in. No key is required for that path.
+		     A configured security.task_key still allows an authenticated remote/manual run as
+		     an explicit opt-in (e.g. curl ?key=... over an SSH tunnel). --->
+		<!--- Report/admin pages are local-only too (same rule as /tasks/): viewable on the
+		     box, never from the public internet. --->
+		<cfset var pageName = listLast( replace( arguments.targetPage, "\", "/", "all" ), "/" ) />
+		<cfset var localOnlyPages = "reports.cfm,discovery-health.cfm,discovered-companies.cfm,discovery-signals.cfm" />
+		<cfif findNoCase( "/tasks/", arguments.targetPage ) GT 0 OR listFindNoCase( localOnlyPages, pageName ) GT 0>
+			<cfset var remoteAddr = ( structKeyExists( cgi, "remote_addr" ) ? trim( cgi.remote_addr ) : "" ) />
+			<cfset var isLocal = listFindNoCase( "127.0.0.1,0:0:0:0:0:0:0:1,::1,localhost", remoteAddr ) GT 0 />
+			<cfset var reqHeaders = getHttpRequestData( false ).headers />
+			<cfset var viaProxy = structKeyExists( reqHeaders, "X-Forwarded-For" )
+				OR structKeyExists( reqHeaders, "X-Real-IP" )
+				OR structKeyExists( reqHeaders, "X-Forwarded-Host" )
+				OR structKeyExists( reqHeaders, "X-Public-Request" ) />
+
+			<cfset var taskKey  = structKeyExists( application, "appConfig" ) ? trim( application.appConfig.get( "security.task_key", "" ) ) : "" />
+			<cfset var provided = ( structKeyExists( url, "key" ) AND isSimpleValue( url.key ) ) ? trim( url.key ) : "" />
+			<cf
